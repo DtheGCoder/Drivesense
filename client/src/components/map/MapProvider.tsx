@@ -36,6 +36,13 @@ export interface RouteStep {
   name: string;
 }
 
+export interface RouteResult {
+  coordinates: [number, number][];
+  duration: number;
+  distance: number;
+  steps: RouteStep[];
+}
+
 interface MapContextValue {
   map: mapboxgl.Map | null;
   loaded: boolean;
@@ -43,9 +50,12 @@ interface MapContextValue {
   flyTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => void;
   drawRoute: (coordinates: [number, number][]) => void;
   clearRoute: () => void;
+  drawAlternativeRoutes: (routes: [number, number][][]) => void;
+  clearAlternativeRoutes: () => void;
   drawBreadcrumb: (coordinates: [number, number][]) => void;
   clearBreadcrumb: () => void;
-  fetchRoute: (from: [number, number], to: [number, number]) => Promise<{ coordinates: [number, number][]; duration: number; distance: number; steps: RouteStep[] } | null>;
+  fetchRoute: (from: [number, number], to: [number, number]) => Promise<RouteResult | null>;
+  fetchRoutes: (from: [number, number], to: [number, number]) => Promise<RouteResult[]>;
   addUserRoute: (userId: string, coordinates: [number, number][], color: string) => void;
   removeUserRoute: (userId: string) => void;
   clearAllUserRoutes: () => void;
@@ -66,6 +76,8 @@ const DEFAULT_CENTER: [number, number] = [8.6821, 50.1109]; // Frankfurt
 const ROUTE_SOURCE_ID = 'route-source';
 const ROUTE_LAYER_ID = 'route-layer';
 const ROUTE_OUTLINE_LAYER_ID = 'route-outline-layer';
+const ALT_ROUTE_COLORS = ['#6366f1', '#f59e0b']; // indigo, amber for alt routes
+const MAX_ALT_ROUTES = 2;
 const BREADCRUMB_SOURCE_ID = 'breadcrumb-source';
 const BREADCRUMB_LAYER_ID = 'breadcrumb-layer';
 const BREADCRUMB_OUTLINE_LAYER_ID = 'breadcrumb-outline-layer';
@@ -174,6 +186,28 @@ export function MapProvider({ children }: { children: ReactNode }) {
         },
       });
 
+      // Alternative route sources + layers (drawn BEFORE main route so main is on top)
+      for (let i = 0; i < MAX_ALT_ROUTES; i++) {
+        map.addSource(`alt-route-source-${i}`, {
+          type: 'geojson',
+          data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } },
+        });
+        map.addLayer({
+          id: `alt-route-outline-${i}`,
+          type: 'line',
+          source: `alt-route-source-${i}`,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': ALT_ROUTE_COLORS[i]!, 'line-width': 8, 'line-opacity': 0.1, 'line-blur': 6 },
+        });
+        map.addLayer({
+          id: `alt-route-layer-${i}`,
+          type: 'line',
+          source: `alt-route-source-${i}`,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': ALT_ROUTE_COLORS[i]!, 'line-width': 4, 'line-opacity': 0.45, 'line-dasharray': [2, 2] },
+        });
+      }
+
       // Breadcrumb trail source (recording, separate from planned route)
       map.addSource(BREADCRUMB_SOURCE_ID, {
         type: 'geojson',
@@ -262,7 +296,24 @@ export function MapProvider({ children }: { children: ReactNode }) {
     drawBreadcrumb([]);
   }, [drawBreadcrumb]);
 
-  const fetchRoute = useCallback(async (from: [number, number], to: [number, number]): Promise<{ coordinates: [number, number][]; duration: number; distance: number; steps: RouteStep[] } | null> => {
+  const drawAlternativeRoutes = useCallback((routes: [number, number][][]) => {
+    for (let i = 0; i < MAX_ALT_ROUTES; i++) {
+      const source = singletonMap?.getSource(`alt-route-source-${i}`) as mapboxgl.GeoJSONSource | undefined;
+      if (!source) continue;
+      const coords = routes[i] ?? [];
+      source.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: coords },
+      });
+    }
+  }, []);
+
+  const clearAlternativeRoutes = useCallback(() => {
+    drawAlternativeRoutes([]);
+  }, [drawAlternativeRoutes]);
+
+  const fetchRoute = useCallback(async (from: [number, number], to: [number, number]): Promise<RouteResult | null> => {
     if (!MAPBOX_TOKEN) return null;
     try {
       const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&steps=true&banner_instructions=true&language=de&access_token=${MAPBOX_TOKEN}`;
@@ -293,6 +344,46 @@ export function MapProvider({ children }: { children: ReactNode }) {
       };
     } catch {
       return null;
+    }
+  }, []);
+
+  // Fetch multiple routes (with alternatives)
+  const parseRoute = (route: Record<string, unknown>): RouteResult => {
+    const steps: RouteStep[] = ((route.legs as unknown[]) ?? []).flatMap((leg: unknown) => {
+      const l = leg as Record<string, unknown>;
+      return ((l.steps as unknown[]) ?? []).map((s) => {
+        const step = s as Record<string, unknown>;
+        return {
+          instruction: ((step.maneuver as Record<string, unknown>)?.instruction as string) ?? '',
+          distance: (step.distance as number) ?? 0,
+          duration: (step.duration as number) ?? 0,
+          maneuver: ((step.maneuver as Record<string, unknown>)?.type as string) ?? '',
+          modifier: ((step.maneuver as Record<string, unknown>)?.modifier as string) ?? '',
+          coordinate: ((step.maneuver as Record<string, unknown>)?.location as [number, number]) ?? [0, 0],
+          name: (step.name as string) ?? '',
+        };
+      });
+    });
+    return {
+      coordinates: (route.geometry as Record<string, unknown>).coordinates as [number, number][],
+      duration: route.duration as number,
+      distance: route.distance as number,
+      steps,
+    };
+  };
+
+  const fetchRoutes = useCallback(async (from: [number, number], to: [number, number]): Promise<RouteResult[]> => {
+    if (!MAPBOX_TOKEN) return [];
+    try {
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&steps=true&alternatives=true&banner_instructions=true&language=de&access_token=${MAPBOX_TOKEN}`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const routes = data.routes as Record<string, unknown>[] | undefined;
+      if (!routes?.length) return [];
+      return routes.map(parseRoute);
+    } catch {
+      return [];
     }
   }, []);
 
@@ -376,7 +467,7 @@ export function MapProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <MapContext.Provider value={{ map: singletonMap, loaded, hasToken, flyTo, drawRoute, clearRoute, drawBreadcrumb, clearBreadcrumb, fetchRoute, addUserRoute, removeUserRoute, clearAllUserRoutes, setInteractive }}>
+    <MapContext.Provider value={{ map: singletonMap, loaded, hasToken, flyTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, drawBreadcrumb, clearBreadcrumb, fetchRoute, fetchRoutes, addUserRoute, removeUserRoute, clearAllUserRoutes, setInteractive }}>
       {children}
     </MapContext.Provider>
   );

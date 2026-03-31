@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, type KeyboardEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useMap, type RouteStep } from '@/components/map/MapProvider';
+import { useMap, type RouteStep, type RouteResult } from '@/components/map/MapProvider';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useProfileStore } from '@/stores/profileStore';
 
@@ -142,6 +142,30 @@ async function reverseGeocode(coords: [number, number]): Promise<string> {
   }
 }
 
+// ─── Geometry Helpers ────────────────────────────────────────────────────────
+
+function distanceToSegment(p: [number, number], a: [number, number], b: [number, number]): number {
+  const cosLat = Math.cos(p[1] * Math.PI / 180);
+  const toM = (lng: number, lat: number) => [lng * 111320 * cosLat, lat * 110540] as const;
+  const [px, py] = toM(p[0], p[1]);
+  const [ax, ay] = toM(a[0], a[1]);
+  const [bx, by] = toM(b[0], b[1]);
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.sqrt((px - (ax + t * dx)) ** 2 + (py - (ay + t * dy)) ** 2);
+}
+
+function distanceToPolyline(point: [number, number], coords: [number, number][]): number {
+  let min = Infinity;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const d = distanceToSegment(point, coords[i]!, coords[i + 1]!);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 // ─── Format Helpers ──────────────────────────────────────────────────────────
 
 function formatDuration(seconds: number): string {
@@ -174,13 +198,15 @@ const POI_CATEGORIES: { key: PoiCategory; label: string; icon: string; mapboxCat
 
 // ─── Route Search Component ─────────────────────────────────────────────────
 
+const ALT_ROUTE_COLORS = ['#6366f1', '#f59e0b'];
+
 interface RouteSearchProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
-  const { flyTo, drawRoute, clearRoute, fetchRoute, map } = useMap();
+  const { flyTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, fetchRoute, fetchRoutes, map } = useMap();
   const { position: gpsPosition } = useGeolocation({ autoStart: true });
   const calculateFuelCost = useProfileStore((s) => s.calculateFuelCost);
 
@@ -205,6 +231,11 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [eta, setEta] = useState('');
   const [remainingDistance, setRemainingDistance] = useState(0);
+
+  // Alternative routes & rerouting
+  const [alternativeRoutes, setAlternativeRoutes] = useState<RouteResult[]>([]);
+  const [isRerouting, setIsRerouting] = useState(false);
+  const offRouteCountRef = useRef(0);
 
   // POI
   const [poiResults, setPoiResults] = useState<SearchResult[]>([]);
@@ -251,64 +282,141 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     }, 300);
   }, [map]);
 
-  // Calculate route
+  // Calculate route (with alternatives when no waypoints)
   const calculateRoute = useCallback(async () => {
     if (!startPoint || !endPoint) return;
     setIsCalculating(true);
+    setAlternativeRoutes([]);
+    clearAlternativeRoutes();
 
-    const points = [startPoint, ...waypoints, endPoint];
-    let totalDistance = 0;
-    let totalDuration = 0;
-    let allCoords: [number, number][] = [];
-    let allSteps: RouteStep[] = [];
+    const hasWaypoints = waypoints.length > 0;
 
-    for (let i = 0; i < points.length - 1; i++) {
-      const from = points[i]!.center;
-      const to = points[i + 1]!.center;
-      const result = await fetchRoute(from, to);
-      if (result) {
-        totalDistance += result.distance;
-        totalDuration += result.duration;
-        allCoords = allCoords.length > 0 ? [...allCoords, ...result.coordinates.slice(1)] : result.coordinates;
-        allSteps = [...allSteps, ...result.steps];
+    const fitBounds = (coords: [number, number][]) => {
+      if (!map || coords.length === 0) return;
+      const bounds = coords.reduce(
+        (b, c) => {
+          b[0] = [Math.min(b[0][0], c[0]), Math.min(b[0][1], c[1])];
+          b[1] = [Math.max(b[1][0], c[0]), Math.max(b[1][1], c[1])];
+          return b;
+        },
+        [[Infinity, Infinity], [-Infinity, -Infinity]] as [[number, number], [number, number]],
+      );
+      map.fitBounds(bounds, { padding: { top: 120, bottom: 300, left: 40, right: 40 }, duration: 1500 });
+    };
+
+    if (!hasWaypoints) {
+      // Direct route — fetch with alternatives
+      const routes = await fetchRoutes(startPoint.center, endPoint.center);
+      if (routes.length > 0) {
+        const main = routes[0]!;
+        drawRoute(main.coordinates);
+        setRouteInfo({ distance: main.distance, duration: main.duration, coordinates: main.coordinates, steps: main.steps });
+        setRemainingDistance(main.distance);
+
+        if (routes.length > 1) {
+          setAlternativeRoutes(routes.slice(1));
+          drawAlternativeRoutes(routes.slice(1).map((r) => r.coordinates));
+        }
+
+        const arrivalTime = new Date(Date.now() + main.duration * 1000);
+        setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
+        fitBounds(routes.flatMap((r) => r.coordinates));
+        setView('overview');
       }
-    }
+    } else {
+      // Waypoints — segment-by-segment (no alternatives)
+      const points = [startPoint, ...waypoints, endPoint];
+      let totalDistance = 0;
+      let totalDuration = 0;
+      let allCoords: [number, number][] = [];
+      let allSteps: RouteStep[] = [];
 
-    if (allCoords.length > 0) {
-      drawRoute(allCoords);
-      const info: RouteInfo = { distance: totalDistance, duration: totalDuration, coordinates: allCoords, steps: allSteps };
-      setRouteInfo(info);
-      setRemainingDistance(totalDistance);
-
-      const arrivalTime = new Date(Date.now() + totalDuration * 1000);
-      setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
-
-      if (map) {
-        const bounds = allCoords.reduce(
-          (b, c) => {
-            b[0] = [Math.min(b[0][0], c[0]), Math.min(b[0][1], c[1])];
-            b[1] = [Math.max(b[1][0], c[0]), Math.max(b[1][1], c[1])];
-            return b;
-          },
-          [[Infinity, Infinity], [-Infinity, -Infinity]] as [[number, number], [number, number]],
-        );
-        map.fitBounds(bounds, { padding: { top: 120, bottom: 300, left: 40, right: 40 }, duration: 1500 });
+      for (let i = 0; i < points.length - 1; i++) {
+        const from = points[i]!.center;
+        const to = points[i + 1]!.center;
+        const result = await fetchRoute(from, to);
+        if (result) {
+          totalDistance += result.distance;
+          totalDuration += result.duration;
+          allCoords = allCoords.length > 0 ? [...allCoords, ...result.coordinates.slice(1)] : result.coordinates;
+          allSteps = [...allSteps, ...result.steps];
+        }
       }
-      setView('overview');
+
+      if (allCoords.length > 0) {
+        drawRoute(allCoords);
+        setRouteInfo({ distance: totalDistance, duration: totalDuration, coordinates: allCoords, steps: allSteps });
+        setRemainingDistance(totalDistance);
+
+        const arrivalTime = new Date(Date.now() + totalDuration * 1000);
+        setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
+        fitBounds(allCoords);
+        setView('overview');
+      }
     }
     setIsCalculating(false);
-  }, [startPoint, endPoint, waypoints, fetchRoute, drawRoute, map]);
+  }, [startPoint, endPoint, waypoints, fetchRoute, fetchRoutes, drawRoute, drawAlternativeRoutes, clearAlternativeRoutes, map]);
 
   // Auto-calculate when both points are set
   useEffect(() => {
     if (startPoint && endPoint) calculateRoute();
   }, [startPoint, endPoint, waypoints, calculateRoute]);
 
-  // Navigation: track current position against route steps
+  // Select an alternative route (swap with main)
+  const selectAlternativeRoute = useCallback((altIndex: number) => {
+    if (!routeInfo || altIndex >= alternativeRoutes.length) return;
+    const selected = alternativeRoutes[altIndex]!;
+    const oldMain: RouteResult = {
+      coordinates: routeInfo.coordinates,
+      duration: routeInfo.duration,
+      distance: routeInfo.distance,
+      steps: routeInfo.steps,
+    };
+    const newAlts = [...alternativeRoutes];
+    newAlts[altIndex] = oldMain;
+
+    drawRoute(selected.coordinates);
+    setRouteInfo({ distance: selected.distance, duration: selected.duration, coordinates: selected.coordinates, steps: selected.steps });
+    setRemainingDistance(selected.distance);
+
+    const arrivalTime = new Date(Date.now() + selected.duration * 1000);
+    setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
+
+    setAlternativeRoutes(newAlts);
+    drawAlternativeRoutes(newAlts.map((r) => r.coordinates));
+  }, [routeInfo, alternativeRoutes, drawRoute, drawAlternativeRoutes]);
+
+  // Navigation: track current position against route steps + off-route detection
   useEffect(() => {
     if (view !== 'navigation' || !routeInfo?.steps.length || !gpsPosition) return;
 
     const userPos: [number, number] = [gpsPosition.lng, gpsPosition.lat];
+
+    // Off-route detection: if > 50m from route polyline for 3+ ticks → reroute
+    if (routeInfo.coordinates.length > 1 && !isRerouting && endPoint) {
+      const distToRoute = distanceToPolyline(userPos, routeInfo.coordinates);
+      if (distToRoute > 50) {
+        offRouteCountRef.current += 1;
+        if (offRouteCountRef.current >= 3) {
+          offRouteCountRef.current = 0;
+          setIsRerouting(true);
+          fetchRoute(userPos, endPoint.center).then((result) => {
+            if (result) {
+              drawRoute(result.coordinates);
+              setRouteInfo({ distance: result.distance, duration: result.duration, coordinates: result.coordinates, steps: result.steps });
+              setRemainingDistance(result.distance);
+              setCurrentStepIndex(0);
+              const arr = new Date(Date.now() + result.duration * 1000);
+              setEta(arr.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
+            }
+            setIsRerouting(false);
+          });
+          return;
+        }
+      } else {
+        offRouteCountRef.current = 0;
+      }
+    }
 
     let closestIdx = currentStepIndex;
     let closestDist = Infinity;
@@ -341,7 +449,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
 
     flyTo({ center: userPos, zoom: 17, pitch: 60, bearing: gpsPosition.heading ?? 0, duration: 800 });
-  }, [view, gpsPosition, routeInfo, currentStepIndex, flyTo]);
+  }, [view, gpsPosition, routeInfo, currentStepIndex, flyTo, isRerouting, endPoint, fetchRoute, drawRoute]);
 
   // Select search result
   const handleSelectResult = useCallback((result: SearchResult) => {
@@ -360,11 +468,14 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   // Start navigation
   const startNavigation = useCallback(() => {
     setCurrentStepIndex(0);
+    setAlternativeRoutes([]);
+    clearAlternativeRoutes();
+    offRouteCountRef.current = 0;
     setView('navigation');
     if (gpsPosition) {
       flyTo({ center: [gpsPosition.lng, gpsPosition.lat], zoom: 17, pitch: 60, bearing: gpsPosition.heading ?? 0, duration: 1500 });
     }
-  }, [gpsPosition, flyTo]);
+  }, [gpsPosition, flyTo, clearAlternativeRoutes]);
 
   // Handle close — single action, resets everything
   const handleClose = useCallback(() => {
@@ -374,6 +485,9 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     setEndQuery('');
     setWaypoints([]);
     setRouteInfo(null);
+    setAlternativeRoutes([]);
+    setIsRerouting(false);
+    offRouteCountRef.current = 0;
     setPoiResults([]);
     setSelectedPoiCategory(null);
     setSearchResults([]);
@@ -381,9 +495,10 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     setCurrentStepIndex(0);
     hasAutoFilledStart.current = false;
     clearRoute();
+    clearAlternativeRoutes();
     flyTo({ pitch: 30, zoom: 14, bearing: 0, duration: 1000 });
     onClose();
-  }, [clearRoute, flyTo, onClose]);
+  }, [clearRoute, clearAlternativeRoutes, flyTo, onClose]);
 
   // Search POIs
   const handlePoiSearch = useCallback(async (category: PoiCategory) => {
@@ -454,6 +569,20 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
             )}
           </div>
         </motion.div>
+
+        {/* Rerouting indicator */}
+        {isRerouting && (
+          <motion.div
+            className="absolute top-[140px] left-0 right-0 pt-safe-top pointer-events-auto"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+          >
+            <div className="mx-3 bg-amber-500/20 backdrop-blur-xl rounded-xl px-4 py-3 flex items-center gap-3 border border-amber-500/20">
+              <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <span className="text-sm font-medium text-amber-400">Neue Route wird berechnet...</span>
+            </div>
+          </motion.div>
+        )}
 
         {/* Bottom: Stats + stop */}
         <motion.div
@@ -560,6 +689,39 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                 <div className="text-sm text-white/50">~{eta}</div>
               </div>
             </div>
+
+            {/* Alternative routes */}
+            {alternativeRoutes.length > 0 && (
+              <div className="border-t border-white/5">
+                <div className="px-4 py-1.5 text-[10px] text-white/30 uppercase tracking-wider font-semibold">Alternative Routen</div>
+                {alternativeRoutes.map((alt, i) => {
+                  const timeDiff = alt.duration - routeInfo.duration;
+                  const diffLabel = Math.abs(timeDiff) < 60
+                    ? 'gleich'
+                    : timeDiff > 0
+                      ? `+${formatDuration(timeDiff)}`
+                      : `${formatDuration(Math.abs(timeDiff))} schneller`;
+                  return (
+                    <button
+                      key={i}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 border-t border-white/5 active:bg-white/5 transition-colors"
+                      onClick={() => selectAlternativeRoute(i)}
+                    >
+                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: ALT_ROUTE_COLORS[i] ?? '#888' }} />
+                      <div className="flex-1 text-left">
+                        <span className="text-sm text-white/70">{formatDistance(alt.distance)}</span>
+                        <span className="text-xs text-white/40 ml-2">{formatDuration(alt.duration)}</span>
+                      </div>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        timeDiff > 60 ? 'text-amber-400 bg-amber-400/10' : timeDiff < -60 ? 'text-emerald-400 bg-emerald-400/10' : 'text-white/50 bg-white/5'
+                      }`}>
+                        {diffLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="flex gap-1.5 px-4 py-2.5 overflow-x-auto no-scrollbar border-t border-white/5">
               {POI_CATEGORIES.map((cat) => (
