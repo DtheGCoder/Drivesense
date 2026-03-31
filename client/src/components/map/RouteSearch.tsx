@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useMap, type RouteStep, type RouteResult } from '@/components/map/MapProvider';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useProfileStore } from '@/stores/profileStore';
+import { useSavedPlacesStore, PLACE_ICONS, PLACE_COLORS, type PlaceIconKey } from '@/stores/savedPlacesStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,28 @@ function ManeuverIcon({ maneuver, modifier, size = 20 }: { maneuver: string; mod
   );
 }
 
+// ─── Place Icon SVGs ─────────────────────────────────────────────────────────
+
+function PlaceIcon({ icon, size = 20, color = 'currentColor' }: { icon: PlaceIconKey; size?: number; color?: string }) {
+  const s = size;
+  const p = { width: s, height: s, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  switch (icon) {
+    case 'home': return <svg {...p}><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>;
+    case 'work': return <svg {...p}><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" /></svg>;
+    case 'star': return <svg {...p} fill={color}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>;
+    case 'heart': return <svg {...p} fill={color}><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" /></svg>;
+    case 'gym': return <svg {...p}><path d="M6.5 6.5h11M6.5 17.5h11" /><rect x="2" y="8.5" width="4" height="7" rx="1" /><rect x="18" y="8.5" width="4" height="7" rx="1" /><line x1="12" y1="6.5" x2="12" y2="17.5" /></svg>;
+    case 'school': return <svg {...p}><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5" /></svg>;
+    case 'shop': return <svg {...p}><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 01-8 0" /></svg>;
+    case 'food': return <svg {...p}><path d="M18 8h1a4 4 0 010 8h-1" /><path d="M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z" /><line x1="6" y1="1" x2="6" y2="4" /><line x1="10" y1="1" x2="10" y2="4" /><line x1="14" y1="1" x2="14" y2="4" /></svg>;
+    case 'fuel': return <svg {...p}><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17" /><path d="M15 10h2a2 2 0 012 2v3a2 2 0 002 2" /><rect x="6" y="6" width="6" height="5" /></svg>;
+    case 'parking': return <svg {...p}><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 17V7h4a3 3 0 010 6H9" /></svg>;
+    case 'hospital': return <svg {...p}><rect x="3" y="3" width="18" height="18" rx="3" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>;
+    case 'pin': return <svg {...p} fill={color}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" /><circle cx="12" cy="10" r="3" fill="none" stroke="#1a1a26" /></svg>;
+    default: return <svg {...p}><circle cx="12" cy="12" r="3" /></svg>;
+  }
+}
+
 // ─── Mapbox Geocoding ────────────────────────────────────────────────────────
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
@@ -103,14 +126,14 @@ function getResultIcon(category?: string): string {
 }
 
 async function geocodeSearch(query: string, proximity?: [number, number]): Promise<SearchResult[]> {
-  if (!MAPBOX_TOKEN || query.length < 2) return [];
+  if (!MAPBOX_TOKEN || query.length < 1) return [];
   try {
     const params = new URLSearchParams({
       access_token: MAPBOX_TOKEN,
       limit: '8',
       language: 'de',
-      country: 'de,at,ch',
-      types: 'address,poi,place,locality,neighborhood',
+      autocomplete: 'true',
+      types: 'address,poi,place,locality,neighborhood,region,district,postcode',
     });
     if (proximity) params.set('proximity', `${proximity[0]},${proximity[1]}`);
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
@@ -240,6 +263,13 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   // POI
   const [poiResults, setPoiResults] = useState<SearchResult[]>([]);
   const [selectedPoiCategory, setSelectedPoiCategory] = useState<PoiCategory | null>(null);
+
+  // Saved places
+  const { places: savedPlaces, addPlace, removePlace } = useSavedPlacesStore();
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveIcon, setSaveIcon] = useState<PlaceIconKey>('pin');
+  const [saveColor, setSaveColor] = useState(PLACE_COLORS[0]!);
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const endInputRef = useRef<HTMLInputElement>(null);
@@ -523,6 +553,31 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     if (e.key === 'Escape') { setSearchResults([]); setActiveInput(null); }
   }, []);
 
+  // Quick-route from saved place
+  const handleQuickRoute = useCallback((place: { id: string; name: string; center: [number, number] }) => {
+    setEndPoint({ id: place.id, label: place.name, center: place.center });
+    setEndQuery(place.name);
+  }, []);
+
+  // Save current destination as a place
+  const handleSavePlace = useCallback(() => {
+    if (!endPoint || !saveName.trim()) return;
+    addPlace({
+      name: saveName.trim(),
+      address: endQuery || endPoint.label,
+      center: endPoint.center,
+      icon: saveIcon,
+      color: saveColor,
+    });
+    setShowSaveModal(false);
+    setSaveName('');
+  }, [endPoint, saveName, endQuery, saveIcon, saveColor, addPlace]);
+
+  // Filter saved places matching current query
+  const matchingSavedPlaces = activeInput && (activeInput === 'start' ? startQuery : endQuery).length >= 1
+    ? savedPlaces.filter((p) => p.name.toLowerCase().includes((activeInput === 'start' ? startQuery : endQuery).toLowerCase()))
+    : [];
+
   if (!isOpen) return null;
 
   const currentStep = routeInfo?.steps[currentStepIndex];
@@ -539,7 +594,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           initial={{ y: -100 }}
           animate={{ y: 0 }}
         >
-          <div className="mx-3 mt-3 bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+          <div className="mx-3 mt-3 bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
             <div className="flex items-center gap-4 p-4">
               <div className="w-14 h-14 rounded-xl bg-ds-primary/15 flex items-center justify-center text-ds-primary flex-shrink-0">
                 <ManeuverIcon maneuver={currentStep.maneuver} modifier={currentStep.modifier} size={28} />
@@ -591,7 +646,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           initial={{ y: 100 }}
           animate={{ y: 0 }}
         >
-          <div className="mx-3 mb-3 bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+          <div className="mx-3 mb-3 bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
             <div className="flex items-center justify-between px-5 py-4">
               <div className="text-center">
                 <div className="text-xl font-bold text-ds-primary">{formatDistance(remainingDistance)}</div>
@@ -647,7 +702,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           initial={{ y: -50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
         >
-          <div className="mx-3 mt-3 bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+          <div className="mx-3 mt-3 bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
             <div className="p-4 space-y-2">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-ds-success flex-shrink-0" />
@@ -668,7 +723,15 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
               ))}
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-ds-danger flex-shrink-0" />
-                <span className="text-sm text-white/80 truncate">{endPoint?.label ?? 'Ziel'}</span>
+                <span className="text-sm text-white/80 truncate flex-1">{endPoint?.label ?? 'Ziel'}</span>
+                {endPoint && (
+                  <button
+                    className="text-[10px] text-ds-primary font-medium px-2 py-1 rounded-full bg-ds-primary/10 active:bg-ds-primary/20 flex-shrink-0"
+                    onClick={() => { setSaveName(endQuery || endPoint.label); setShowSaveModal(true); }}
+                  >
+                    Speichern
+                  </button>
+                )}
               </div>
             </div>
 
@@ -743,7 +806,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
         <AnimatePresence>
           {poiResults.length > 0 && (
             <motion.div
-              className="absolute top-[250px] left-3 right-3 z-40 pointer-events-auto bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl border border-white/5"
+              className="absolute top-[250px] left-3 right-3 z-40 pointer-events-auto bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl border border-white/5"
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -782,7 +845,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.15 }}
         >
-          <div className="mx-3 mb-3 bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+          <div className="mx-3 mb-3 bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
             <div className="max-h-36 overflow-y-auto">
               {routeInfo.steps.filter((s) => s.instruction).slice(0, 8).map((step, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 last:border-0">
@@ -815,6 +878,81 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
             </div>
           </div>
         </motion.div>
+
+        {/* Save place modal (overview) */}
+        <AnimatePresence>
+          {showSaveModal && endPoint && (
+            <motion.div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSaveModal(false)}
+            >
+              <motion.div
+                className="w-[85%] max-w-sm bg-ds-surface rounded-2xl overflow-hidden border border-white/10 shadow-2xl"
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-4 border-b border-white/5">
+                  <h3 className="text-sm font-bold text-white">Ort speichern</h3>
+                  <p className="text-[11px] text-white/40 mt-0.5 truncate">{endPoint.label}</p>
+                </div>
+                <div className="p-4 space-y-4">
+                  <input
+                    className="w-full bg-ds-surface-2 rounded-xl px-3 py-2.5 text-sm text-white outline-none border border-white/10 focus:border-ds-primary/50 placeholder:text-white/30"
+                    placeholder="Name..."
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    autoFocus
+                  />
+                  <div>
+                    <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold mb-2 block">Icon</span>
+                    <div className="grid grid-cols-6 gap-2">
+                      {PLACE_ICONS.map((pi) => (
+                        <button
+                          key={pi.key}
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${saveIcon === pi.key ? 'bg-ds-primary/20 border border-ds-primary/40 scale-110' : 'bg-white/5 border border-transparent'}`}
+                          onClick={() => setSaveIcon(pi.key)}
+                          title={pi.label}
+                        >
+                          <PlaceIcon icon={pi.key} size={18} color={saveIcon === pi.key ? saveColor : '#ffffff80'} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold mb-2 block">Farbe</span>
+                    <div className="flex flex-wrap gap-2">
+                      {PLACE_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          className={`w-8 h-8 rounded-full transition-all ${saveColor === c ? 'scale-125 ring-2 ring-white/30' : ''}`}
+                          style={{ backgroundColor: c }}
+                          onClick={() => setSaveColor(c)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-2 p-4 border-t border-white/5">
+                  <button className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-medium active:bg-white/10" onClick={() => setShowSaveModal(false)}>
+                    Abbrechen
+                  </button>
+                  <button
+                    className="flex-1 py-2.5 rounded-xl bg-ds-primary text-ds-bg text-sm font-bold disabled:opacity-30 active:opacity-80"
+                    disabled={!saveName.trim()}
+                    onClick={handleSavePlace}
+                  >
+                    Speichern
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -831,7 +969,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     >
       <div className="mx-3 mt-3 space-y-2">
         {/* Search card */}
-        <div className="bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
+        <div className="bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
           {/* Header with close */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
             <span className="text-xs font-semibold text-white/40 uppercase tracking-wider">Route planen</span>
@@ -913,6 +1051,14 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                 + Zwischenstopp
               </button>
             )}
+            {endPoint && (
+              <button
+                className="text-[11px] text-ds-primary font-medium px-3 py-1.5 rounded-full bg-ds-primary/10 active:bg-ds-primary/20"
+                onClick={() => { setSaveName(endQuery || endPoint.label); setShowSaveModal(true); }}
+              >
+                Ort speichern
+              </button>
+            )}
             {isCalculating && (
               <div className="flex items-center gap-2 text-xs text-white/40">
                 <div className="w-3.5 h-3.5 border-2 border-ds-primary border-t-transparent rounded-full animate-spin" />
@@ -922,17 +1068,56 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           </div>
         </div>
 
+        {/* Saved places quick-route buttons */}
+        {!activeInput && savedPlaces.length > 0 && (
+          <div className="bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold">Gespeicherte Orte</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {savedPlaces.map((place) => (
+                <button
+                  key={place.id}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 active:bg-white/10 transition-colors border border-white/5"
+                  onClick={() => handleQuickRoute(place)}
+                  onContextMenu={(e) => { e.preventDefault(); removePlace(place.id); }}
+                >
+                  <PlaceIcon icon={place.icon} size={16} color={place.color} />
+                  <span className="text-xs text-white/70 font-medium">{place.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Search results */}
         <AnimatePresence>
-          {(searchResults.length > 0 || isSearching) && activeInput && (
+          {(searchResults.length > 0 || matchingSavedPlaces.length > 0 || isSearching) && activeInput && (
             <motion.div
-              className="bg-[#1a1a2e]/95 backdrop-blur-xl rounded-2xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl border border-white/5"
+              className="bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden max-h-64 overflow-y-auto shadow-2xl border border-white/5"
               initial={{ opacity: 0, y: -8, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.98 }}
               style={{ transformOrigin: 'top' }}
             >
-              {isSearching && searchResults.length === 0 && (
+              {/* Matching saved places */}
+              {matchingSavedPlaces.map((place) => (
+                <button
+                  key={`saved-${place.id}`}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left border-b border-white/5 active:bg-white/5 transition-colors"
+                  onClick={() => handleSelectResult({ id: place.id, name: place.name, address: place.address, center: place.center })}
+                >
+                  <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <PlaceIcon icon={place.icon} size={18} color={place.color} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-white/90 truncate">{place.name}</div>
+                    <div className="text-[11px] text-white/30 truncate">{place.address}</div>
+                  </div>
+                  <span className="text-[9px] text-ds-primary bg-ds-primary/10 rounded-full px-2 py-0.5 flex-shrink-0">Gespeichert</span>
+                </button>
+              ))}
+              {isSearching && searchResults.length === 0 && matchingSavedPlaces.length === 0 && (
                 <div className="flex items-center gap-3 px-4 py-4 text-sm text-white/30">
                   <div className="w-4 h-4 border-2 border-ds-primary border-t-transparent rounded-full animate-spin" />
                   Suche...
@@ -960,6 +1145,81 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Save place modal */}
+      <AnimatePresence>
+        {showSaveModal && endPoint && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowSaveModal(false)}
+          >
+            <motion.div
+              className="w-[85%] max-w-sm bg-ds-surface rounded-2xl overflow-hidden border border-white/10 shadow-2xl"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b border-white/5">
+                <h3 className="text-sm font-bold text-white">Ort speichern</h3>
+                <p className="text-[11px] text-white/40 mt-0.5 truncate">{endPoint.label}</p>
+              </div>
+              <div className="p-4 space-y-4">
+                <input
+                  className="w-full bg-ds-surface-2 rounded-xl px-3 py-2.5 text-sm text-white outline-none border border-white/10 focus:border-ds-primary/50 placeholder:text-white/30"
+                  placeholder="Name..."
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  autoFocus
+                />
+                <div>
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold mb-2 block">Icon</span>
+                  <div className="grid grid-cols-6 gap-2">
+                    {PLACE_ICONS.map((pi) => (
+                      <button
+                        key={pi.key}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${saveIcon === pi.key ? 'bg-ds-primary/20 border border-ds-primary/40 scale-110' : 'bg-white/5 border border-transparent'}`}
+                        onClick={() => setSaveIcon(pi.key)}
+                        title={pi.label}
+                      >
+                        <PlaceIcon icon={pi.key} size={18} color={saveIcon === pi.key ? saveColor : '#ffffff80'} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold mb-2 block">Farbe</span>
+                  <div className="flex flex-wrap gap-2">
+                    {PLACE_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        className={`w-8 h-8 rounded-full transition-all ${saveColor === c ? 'scale-125 ring-2 ring-white/30' : ''}`}
+                        style={{ backgroundColor: c }}
+                        onClick={() => setSaveColor(c)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 p-4 border-t border-white/5">
+                <button className="flex-1 py-2.5 rounded-xl bg-white/5 text-white/60 text-sm font-medium active:bg-white/10" onClick={() => setShowSaveModal(false)}>
+                  Abbrechen
+                </button>
+                <button
+                  className="flex-1 py-2.5 rounded-xl bg-ds-primary text-ds-bg text-sm font-bold disabled:opacity-30 active:opacity-80"
+                  disabled={!saveName.trim()}
+                  onClick={handleSavePlace}
+                >
+                  Speichern
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
