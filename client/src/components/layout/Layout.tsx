@@ -6,14 +6,22 @@ interface LayoutProps {
   children: ReactNode;
   showNav?: boolean;
   fullScreen?: boolean;
+  /** When true, map is fully visible and content floats on top without backdrop */
+  mapMode?: boolean;
 }
 
-export function Layout({ children, showNav = true, fullScreen = false }: LayoutProps) {
+export function Layout({ children, showNav = true, fullScreen = false, mapMode = false }: LayoutProps) {
   return (
-    <div className={`min-h-dvh flex flex-col ${fullScreen ? '' : 'pb-[calc(80px+var(--spacing-safe-bottom))]'}`}>
+    <div className="min-h-dvh flex flex-col relative">
+      {/* Semi-transparent backdrop — hides map slightly on non-map pages */}
+      {!mapMode && (
+        <div className="fixed inset-0 z-[1] bg-ds-bg/70 backdrop-blur-sm pointer-events-none" />
+      )}
+
+      {/* Page content */}
       <AnimatePresence mode="wait">
         <motion.main
-          className={`flex-1 ${fullScreen ? '' : 'px-4 pt-safe-top'}`}
+          className={`flex-1 relative z-[2] ${mapMode ? 'pointer-events-none [&>*]:pointer-events-auto' : ''} ${fullScreen ? '' : `px-4 pt-safe-top ${showNav ? 'pb-[calc(80px+var(--spacing-safe-bottom))]' : ''}`}`}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
@@ -22,6 +30,7 @@ export function Layout({ children, showNav = true, fullScreen = false }: LayoutP
           {children}
         </motion.main>
       </AnimatePresence>
+
       {showNav && <BottomNav />}
     </div>
   );

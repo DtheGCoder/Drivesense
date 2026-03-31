@@ -1,5 +1,6 @@
 import { motion, useSpring, useTransform } from 'framer-motion';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { IconModeSchool, IconModeRacing, IconModeEco, IconModeFree } from './Icons';
 
 // ─── Animated Number Counter ─────────────────────────────────────────────────
 
@@ -246,29 +247,31 @@ interface ModeBadgeProps {
   size?: 'sm' | 'md';
 }
 
-const modeConfig = {
-  driving_school: { label: 'Fahrschule', color: 'var(--color-ds-mode-school)', icon: '🎓' },
-  racing: { label: 'Racing', color: 'var(--color-ds-mode-racing)', icon: '🏁' },
-  eco: { label: 'Eco', color: 'var(--color-ds-mode-eco)', icon: '🌿' },
-  free: { label: 'Frei', color: 'var(--color-ds-mode-free)', icon: '✨' },
+const modeConfig: Record<string, { label: string; color: string; icon: (size: number) => ReactNode }> = {
+  driving_school: { label: 'Fahrschule', color: 'var(--color-ds-mode-school)', icon: (s) => <IconModeSchool size={s} /> },
+  racing: { label: 'Racing', color: 'var(--color-ds-mode-racing)', icon: (s) => <IconModeRacing size={s} /> },
+  eco: { label: 'Eco', color: 'var(--color-ds-mode-eco)', icon: (s) => <IconModeEco size={s} /> },
+  free: { label: 'Frei', color: 'var(--color-ds-mode-free)', icon: (s) => <IconModeFree size={s} /> },
 };
 
 export function ModeBadge({ mode, size = 'md' }: ModeBadgeProps) {
   const cfg = modeConfig[mode];
-  const sizeClass = size === 'sm' ? 'text-xs px-2.5 py-1 gap-1' : 'text-sm px-3.5 py-1.5 gap-1.5';
+  if (!cfg) return null;
+  const sizeClass = size === 'sm' ? 'text-xs px-2.5 py-1 gap-1.5' : 'text-sm px-3.5 py-1.5 gap-2';
+  const iconSize = size === 'sm' ? 12 : 14;
 
   return (
     <motion.div
       className={`inline-flex items-center rounded-full font-medium ${sizeClass}`}
       style={{
-        backgroundColor: `${cfg.color}15`,
+        backgroundColor: `${cfg.color}12`,
         color: cfg.color,
-        border: `1px solid ${cfg.color}30`,
+        border: `1px solid ${cfg.color}20`,
       }}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
     >
-      <span>{cfg.icon}</span>
+      {cfg.icon(iconSize)}
       <span>{cfg.label}</span>
     </motion.div>
   );

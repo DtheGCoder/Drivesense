@@ -4,7 +4,10 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { MAPBOX_DARK_STYLE } from './mapStyle';
 
 // Token should come from env in production
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN ?? '';
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+if (MAPBOX_TOKEN) {
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+}
 
 interface MapViewProps {
   className?: string;
@@ -36,9 +39,10 @@ export function MapView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const hasToken = !!MAPBOX_TOKEN;
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current || mapRef.current || !hasToken) return;
 
     const map = new mapboxgl.Map({
       container: containerRef.current,
@@ -129,12 +133,38 @@ export function MapView({
 
   return (
     <div className={`relative ${className}`}>
-      <div ref={containerRef} className="w-full h-full" />
-      {!loaded && (
-        <div className="absolute inset-0 bg-ds-bg flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-ds-primary border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm text-ds-text-muted">Karte wird geladen…</span>
+      {hasToken ? (
+        <>
+          <div ref={containerRef} className="w-full h-full" />
+          {!loaded && (
+            <div className="absolute inset-0 bg-ds-bg flex items-center justify-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-ds-primary border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm text-ds-text-muted">Karte wird geladen…</span>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        /* Beautiful fallback when no Mapbox token is configured */
+        <div className="w-full h-full bg-ds-surface flex items-center justify-center overflow-hidden">
+          {/* Animated grid background */}
+          <div className="absolute inset-0" style={{
+            backgroundImage: `
+              linear-gradient(rgba(0,240,255,0.05) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(0,240,255,0.05) 1px, transparent 1px)
+            `,
+            backgroundSize: '40px 40px',
+          }} />
+          {/* Glow */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-ds-primary/8 blur-[100px]" />
+          {/* Content */}
+          <div className="relative text-center px-6 space-y-3">
+            <div className="text-5xl mb-2">🗺️</div>
+            <p className="text-base font-semibold text-ds-text">Karte im Demo-Modus</p>
+            <p className="text-xs text-ds-text-muted max-w-[240px] mx-auto leading-relaxed">
+              Setze <code className="text-ds-primary bg-ds-primary/10 px-1.5 py-0.5 rounded text-[11px]">VITE_MAPBOX_TOKEN</code> in <code className="text-ds-primary bg-ds-primary/10 px-1.5 py-0.5 rounded text-[11px]">client/.env</code> für die volle Kartenansicht.
+            </p>
           </div>
         </div>
       )}

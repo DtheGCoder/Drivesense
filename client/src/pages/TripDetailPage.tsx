@@ -1,64 +1,55 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { type ReactNode } from 'react';
 import { Layout } from '@/components/layout/Layout';
 import { GlassCard, StatCard } from '@/components/ui/GlassCard';
 import { ScoreRing, ModeBadge, AnimatedNumber } from '@/components/ui/DataDisplays';
-import type { TripMode } from '@/stores/tripStore';
+import { IconChevronLeft, IconChevronRight, IconShare, IconBarChart, IconClock, IconShield, IconZap, IconGauge, IconActivity, IconCar } from '@/components/ui/Icons';
+import { useTripHistoryStore, type TripRecord } from '@/stores/tripHistoryStore';
 
-// ─── Demo Trip Detail ────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-interface TripDetail {
-  id: string;
-  mode: TripMode;
-  score: number;
-  date: string;
-  time: string;
-  duration: number;
-  distance: number;
-  avgSpeed: number;
-  maxSpeed: number;
-  maxGForce: number;
-  startAddress: string;
-  endAddress: string;
-  scores: { label: string; value: number; icon: string }[];
-  events: { time: string; message: string; points: number; type: 'positive' | 'negative' | 'neutral' }[];
+function recordToDetail(r: TripRecord) {
+  const d = new Date(r.startedAt);
+  const dateStr = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return {
+    id: r.id,
+    mode: r.mode,
+    score: r.score,
+    date: dateStr,
+    time: timeStr,
+    duration: r.duration,
+    distance: r.distance,
+    avgSpeed: r.avgSpeed,
+    maxSpeed: r.maxSpeed,
+    maxGForce: r.maxGForce,
+    startAddress: r.startAddress,
+    endAddress: r.endAddress,
+    scores: [
+      { label: 'Bremsen', value: r.scores.braking, icon: <IconShield size={14} /> },
+      { label: 'Beschleunigung', value: r.scores.acceleration, icon: <IconZap size={14} /> },
+      { label: 'Kurven', value: r.scores.cornering, icon: <IconActivity size={14} /> },
+      { label: 'Geschwindigkeit', value: r.scores.speed, icon: <IconGauge size={14} /> },
+      { label: 'Konstanz', value: r.scores.consistency, icon: <IconBarChart size={14} /> },
+    ],
+    events: r.events.map((e) => {
+      const t = new Date(e.timestamp);
+      return {
+        time: `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`,
+        message: e.message,
+        points: e.points,
+        type: e.type,
+      };
+    }),
+    fuelCost: r.fuelCost,
+    fuelUsed: r.fuelUsed,
+  };
 }
-
-const demoDetail: TripDetail = {
-  id: '1',
-  mode: 'driving_school',
-  score: 87,
-  date: '15.01.2024',
-  time: '08:34',
-  duration: 1620,
-  distance: 12400,
-  avgSpeed: 27.6,
-  maxSpeed: 58,
-  maxGForce: 0.42,
-  startAddress: 'Zuhause, Musterstr. 12',
-  endAddress: 'Uni Frankfurt',
-  scores: [
-    { label: 'Bremsen', value: 92, icon: '🛑' },
-    { label: 'Beschleunigung', value: 88, icon: '🚀' },
-    { label: 'Kurven', value: 85, icon: '🔄' },
-    { label: 'Geschwindigkeit', value: 90, icon: '⚡' },
-    { label: 'Konstanz', value: 80, icon: '📊' },
-    { label: 'Voraussicht', value: 89, icon: '👁️' },
-  ],
-  events: [
-    { time: '08:36', message: 'Sanftes Anfahren am Berg', points: 3, type: 'positive' },
-    { time: '08:39', message: 'Optimale Kurvengeschwindigkeit', points: 2, type: 'positive' },
-    { time: '08:42', message: 'Harte Bremsung – Ampel', points: -5, type: 'negative' },
-    { time: '08:45', message: 'Gleichmäßige Autobahnfahrt', points: 4, type: 'positive' },
-    { time: '08:48', message: 'Reißverschluss vorbildlich', points: 3, type: 'positive' },
-    { time: '08:52', message: 'Kupplung bei Schalten geschleift', points: -2, type: 'negative' },
-    { time: '08:55', message: 'Perfektes Einparken', points: 5, type: 'positive' },
-  ],
-};
 
 // ─── Score Bar ───────────────────────────────────────────────────────────────
 
-function ScoreBar({ label, value, icon, delay }: { label: string; value: number; icon: string; delay: number }) {
+function ScoreBar({ label, value, icon, delay }: { label: string; value: number; icon: ReactNode; delay: number }) {
   const getColor = (v: number) => {
     if (v >= 90) return 'var(--color-ds-score-excellent)';
     if (v >= 75) return 'var(--color-ds-score-good)';
@@ -97,7 +88,7 @@ function ScoreBar({ label, value, icon, delay }: { label: string; value: number;
 
 // ─── Event List Item ─────────────────────────────────────────────────────────
 
-function EventItem({ event, index }: { event: TripDetail['events'][number]; index: number }) {
+function EventItem({ event, index }: { event: { time: string; message: string; points: number; type: 'positive' | 'negative' | 'neutral' }; index: number }) {
   const isPositive = event.type === 'positive';
   return (
     <motion.div
@@ -134,8 +125,27 @@ function EventItem({ event, index }: { event: TripDetail['events'][number]; inde
 export function TripDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const trip = demoDetail; // Use demo data for now
-  void id;
+  const record = useTripHistoryStore((s) => s.getTrip(id ?? ''));
+
+  if (!record) {
+    return (
+      <Layout showNav={false}>
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-4">
+          <IconCar size={48} />
+          <p className="text-ds-text-muted text-center">Fahrt nicht gefunden</p>
+          <motion.button
+            className="px-6 py-2 rounded-full bg-ds-primary text-ds-bg font-medium"
+            whileTap={{ scale: 0.95 }}
+            onClick={() => navigate('/trips')}
+          >
+            Zurück
+          </motion.button>
+        </div>
+      </Layout>
+    );
+  }
+
+  const trip = recordToDetail(record);
 
   const formatDuration = (s: number) => {
     const m = Math.floor(s / 60);
@@ -173,9 +183,7 @@ export function TripDetailPage() {
                 whileTap={{ scale: 0.95 }}
                 onClick={() => navigate(-1)}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
+                <IconChevronLeft size={20} color="white" />
               </motion.button>
               <ModeBadge mode={trip.mode} size="sm" />
               <motion.button
@@ -183,11 +191,7 @@ export function TripDetailPage() {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                  <polyline points="16 6 12 2 8 6" />
-                  <line x1="12" y1="2" x2="12" y2="15" />
-                </svg>
+                <IconShare size={20} color="white" />
               </motion.button>
             </div>
           </div>
@@ -203,9 +207,7 @@ export function TripDetailPage() {
                 <div className="flex-1">
                   <h1 className="text-lg font-bold">{trip.startAddress}</h1>
                   <div className="flex items-center gap-1 text-ds-text-muted text-sm mb-2">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="9 18 15 12 9 6" />
-                    </svg>
+                    <IconChevronRight size={12} />
                     {trip.endAddress}
                   </div>
                   <div className="text-xs text-ds-text-muted">{trip.date} · {trip.time} Uhr</div>
@@ -227,6 +229,25 @@ export function TripDetailPage() {
             <StatCard label="Max G" value={`${trip.maxGForce.toFixed(2)}`} unit="g" />
           </motion.div>
 
+          {/* Fuel Cost */}
+          {trip.fuelCost != null && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+            >
+              <GlassCard className="p-4 flex items-center justify-between">
+                <span className="text-sm text-ds-text-muted">Geschätzte Kosten</span>
+                <span className="font-bold text-ds-primary">
+                  {trip.fuelCost.toFixed(2)} €
+                  {trip.fuelUsed != null && (
+                    <span className="text-xs text-ds-text-muted ml-2">({trip.fuelUsed.toFixed(2)} L)</span>
+                  )}
+                </span>
+              </GlassCard>
+            </motion.div>
+          )}
+
           {/* Score Breakdown */}
           <motion.div
             initial={{ opacity: 0, y: 15 }}
@@ -235,9 +256,7 @@ export function TripDetailPage() {
           >
             <GlassCard className="p-5">
               <h2 className="text-base font-semibold mb-4 flex items-center gap-2">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-primary)" strokeWidth="2">
-                  <path d="M12 20V10" /><path d="M18 20V4" /><path d="M6 20v-4" />
-                </svg>
+                <IconBarChart size={18} color="var(--color-ds-primary)" />
                 Bewertung
               </h2>
               <div className="space-y-3">
@@ -256,9 +275,7 @@ export function TripDetailPage() {
           >
             <GlassCard className="p-5">
               <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-primary)" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                </svg>
+                <IconClock size={18} color="var(--color-ds-primary)" />
                 Ereignisse
                 <span className="text-xs text-ds-text-muted ml-auto">
                   <AnimatedNumber value={trip.events.filter(e => e.type === 'positive').length} /> positiv · <AnimatedNumber value={trip.events.filter(e => e.type === 'negative').length} /> negativ

@@ -4,12 +4,13 @@ import { useTripStore } from '@/stores/tripStore';
 
 const navItems = [
   {
-    path: '/dashboard',
-    label: 'Home',
+    path: '/map',
+    label: 'Karte',
     icon: (active: boolean) => (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={active ? '#00f0ff' : '#5e5e76'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-        <polyline points="9 22 9 12 15 12 15 22" />
+        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+        <line x1="8" y1="2" x2="8" y2="18" />
+        <line x1="16" y1="6" x2="16" y2="22" />
       </svg>
     ),
   },
@@ -108,7 +109,7 @@ export function BottomNav() {
           }
 
           const isActive = location.pathname === item.path ||
-            (item.path === '/dashboard' && location.pathname === '/');
+            (item.path === '/map' && location.pathname === '/');
 
           return (
             <NavLink
@@ -118,8 +119,7 @@ export function BottomNav() {
             >
               {isActive && (
                 <motion.div
-                  className="absolute -top-[1px] left-1/2 w-8 h-0.5 bg-ds-primary rounded-full"
-                  style={{ x: '-50%' }}
+                  className="absolute -top-[1px] left-1/2 -translate-x-1/2 w-8 h-0.5 bg-ds-primary rounded-full"
                   layoutId="nav-indicator"
                   transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                 />

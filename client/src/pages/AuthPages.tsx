@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Button } from '@/components/ui/Button';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuthStore, authenticateUser, registerUser } from '@/stores/authStore';
+import { useMap } from '@/components/map/MapProvider';
+import { LogoDriveSense, IconMail, IconLock, IconUser, IconCheck } from '@/components/ui/Icons';
 
 // ─── Input Component ─────────────────────────────────────────────────────────
 
@@ -40,40 +42,51 @@ function Input({ label, error, icon, ...props }: InputProps) {
 export function LoginPage() {
   const navigate = useNavigate();
   const { setUser } = useAuthStore();
+  const { setInteractive } = useMap();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Disable map interaction on auth pages
+  useEffect(() => {
+    setInteractive(false);
+    return () => { setInteractive(true); };
+  }, [setInteractive]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    // Demo login — in production, call API
-    await new Promise((r) => setTimeout(r, 1000));
+    // Small delay for UX
+    await new Promise((r) => setTimeout(r, 300));
 
-    if (email && password) {
-      setUser({
-        id: 'demo-user',
-        username: 'drivesense_user',
-        email,
-        role: 'user',
-      });
-      navigate('/dashboard');
-    } else {
+    if (!email || !password) {
       setError('Bitte fülle alle Felder aus.');
+      setLoading(false);
+      return;
     }
+
+    const result = authenticateUser(email, password);
+    if ('error' in result) {
+      setError(result.error);
+      setLoading(false);
+      return;
+    }
+
+    setUser(result);
+    navigate('/map');
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-ds-bg">
+    <div className="fixed inset-0 z-10 flex flex-col items-center justify-center px-6 py-12 bg-ds-bg/60 backdrop-blur-sm">
       {/* Background glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-ds-primary/5 blur-[120px] pointer-events-none" />
 
       <motion.div
-        className="w-full max-w-sm space-y-8"
+        className="w-full max-w-sm space-y-8 relative z-10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -81,12 +94,12 @@ export function LoginPage() {
         {/* Logo */}
         <div className="text-center">
           <motion.div
-            className="w-20 h-20 rounded-2xl bg-gradient-to-br from-ds-primary to-ds-primary-dim flex items-center justify-center text-4xl mx-auto mb-4"
+            className="w-20 h-20 rounded-2xl bg-gradient-to-br from-ds-primary to-ds-primary-dim flex items-center justify-center mx-auto mb-4"
             initial={{ scale: 0, rotate: -180 }}
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15 }}
           >
-            🚗
+            <LogoDriveSense size={44} />
           </motion.div>
           <h1 className="text-3xl font-black">
             Drive<span className="text-ds-primary">Sense</span>
@@ -105,9 +118,7 @@ export function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
               icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-                </svg>
+                <IconMail size={16} />
               }
             />
 
@@ -119,9 +130,7 @@ export function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
               icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
+                <IconLock size={16} />
               }
             />
 
@@ -164,12 +173,19 @@ export function LoginPage() {
 export function RegisterPage() {
   const navigate = useNavigate();
   const { setUser } = useAuthStore();
+  const { setInteractive } = useMap();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Disable map interaction on auth pages
+  useEffect(() => {
+    setInteractive(false);
+    return () => { setInteractive(true); };
+  }, [setInteractive]);
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -190,24 +206,31 @@ export function RegisterPage() {
     setErrors({});
     setLoading(true);
 
-    // Demo register
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, 300));
+
+    const result = registerUser(username, email, password);
+    if ('error' in result) {
+      setErrors({ email: result.error });
+      setLoading(false);
+      return;
+    }
+
     setUser({
-      id: 'demo-user',
-      username,
-      email,
-      role: 'user',
+      id: result.id,
+      username: result.username,
+      email: result.email,
+      role: result.role,
     });
-    navigate('/dashboard');
+    navigate('/map');
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-ds-bg">
+    <div className="fixed inset-0 z-10 flex flex-col items-center justify-center px-6 py-12 bg-ds-bg/60 backdrop-blur-sm">
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-ds-primary/5 blur-[120px] pointer-events-none" />
 
       <motion.div
-        className="w-full max-w-sm space-y-6"
+        className="w-full max-w-sm space-y-6 relative z-10"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -215,12 +238,12 @@ export function RegisterPage() {
         {/* Header */}
         <div className="text-center">
           <motion.div
-            className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ds-primary to-ds-primary-dim flex items-center justify-center text-3xl mx-auto mb-3"
+            className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ds-primary to-ds-primary-dim flex items-center justify-center mx-auto mb-3"
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15 }}
           >
-            🏁
+            <LogoDriveSense size={36} />
           </motion.div>
           <h1 className="text-2xl font-bold">Konto erstellen</h1>
           <p className="text-sm text-ds-text-muted mt-1">Starte dein Fahrabenteuer</p>
@@ -238,9 +261,7 @@ export function RegisterPage() {
               error={errors.username}
               autoComplete="username"
               icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-                </svg>
+                <IconUser size={16} />
               }
             />
 
@@ -253,9 +274,7 @@ export function RegisterPage() {
               error={errors.email}
               autoComplete="email"
               icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-                </svg>
+                <IconMail size={16} />
               }
             />
 
@@ -268,9 +287,7 @@ export function RegisterPage() {
               error={errors.password}
               autoComplete="new-password"
               icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
+                <IconLock size={16} />
               }
             />
 
@@ -283,9 +300,7 @@ export function RegisterPage() {
               error={errors.confirmPassword}
               autoComplete="new-password"
               icon={
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+                <IconCheck size={16} />
               }
             />
 

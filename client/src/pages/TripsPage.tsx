@@ -5,7 +5,9 @@ import { Layout } from '@/components/layout/Layout';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { ScoreRing } from '@/components/ui/DataDisplays';
 import { ModeBadge } from '@/components/ui/DataDisplays';
+import { IconChevronRight, IconModeFree, IconCar } from '@/components/ui/Icons';
 import type { TripMode } from '@/stores/tripStore';
+import { useTripHistoryStore, type TripRecord } from '@/stores/tripHistoryStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,16 +24,22 @@ interface TripSummary {
   endAddress: string;
 }
 
-// ─── Demo Data ───────────────────────────────────────────────────────────────
-
-const demoTrips: TripSummary[] = [
-  { id: '1', date: '2024-01-15', time: '08:34', mode: 'driving_school', score: 87, distance: 12400, duration: 1620, avgSpeed: 27.6, startAddress: 'Zuhause, Musterstr. 12', endAddress: 'Uni Frankfurt' },
-  { id: '2', date: '2024-01-14', time: '18:12', mode: 'racing', score: 72, distance: 8900, duration: 720, avgSpeed: 44.5, startAddress: 'Nordwestkreuz', endAddress: 'A5 Abfahrt Bad Homburg' },
-  { id: '3', date: '2024-01-14', time: '14:00', mode: 'eco', score: 94, distance: 5300, duration: 840, avgSpeed: 22.7, startAddress: 'Sachsenhausen', endAddress: 'Palmengarten' },
-  { id: '4', date: '2024-01-13', time: '20:45', mode: 'free', score: 0, distance: 25600, duration: 2100, avgSpeed: 43.9, startAddress: 'Frankfurt', endAddress: 'Darmstadt' },
-  { id: '5', date: '2024-01-12', time: '07:15', mode: 'driving_school', score: 91, distance: 15200, duration: 2400, avgSpeed: 22.8, startAddress: 'Fahrschule Schmidt', endAddress: 'Berger Str.' },
-  { id: '6', date: '2024-01-11', time: '17:30', mode: 'racing', score: 65, distance: 18000, duration: 960, avgSpeed: 67.5, startAddress: 'A661 Friedberg', endAddress: 'Offenbacher Kreuz' },
-];
+// Convert TripRecord to TripSummary for display
+function recordToSummary(r: TripRecord): TripSummary {
+  const d = new Date(r.startedAt);
+  return {
+    id: r.id,
+    date: d.toISOString().split('T')[0]!,
+    time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+    mode: r.mode,
+    score: r.score,
+    distance: r.distance,
+    duration: r.duration,
+    avgSpeed: r.avgSpeed,
+    startAddress: r.startAddress,
+    endAddress: r.endAddress,
+  };
+}
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
@@ -39,10 +47,10 @@ type ModeFilter = 'all' | TripMode;
 
 const modeFilters: { key: ModeFilter; label: string }[] = [
   { key: 'all', label: 'Alle' },
-  { key: 'driving_school', label: '🎓 Fahrschule' },
-  { key: 'racing', label: '🏁 Racing' },
-  { key: 'eco', label: '🌿 Eco' },
-  { key: 'free', label: '✨ Frei' },
+  { key: 'driving_school', label: 'Fahrschule' },
+  { key: 'racing', label: 'Racing' },
+  { key: 'eco', label: 'Eco' },
+  { key: 'free', label: 'Frei' },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -86,8 +94,8 @@ function TripRow({ trip, index }: { trip: TripSummary; index: number }) {
           {/* Score */}
           <div className="flex-shrink-0">
             {trip.mode === 'free' ? (
-              <div className="w-14 h-14 rounded-full bg-ds-surface-2 flex items-center justify-center text-lg">
-                ✨
+              <div className="w-14 h-14 rounded-full bg-ds-surface-2 flex items-center justify-center text-ds-mode-free">
+                <IconModeFree size={22} />
               </div>
             ) : (
               <ScoreRing score={trip.score} size={56} strokeWidth={4} />
@@ -98,9 +106,7 @@ function TripRow({ trip, index }: { trip: TripSummary; index: number }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="font-semibold text-sm truncate">{trip.startAddress}</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-text-muted)" strokeWidth="2">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
+              <IconChevronRight size={14} color="var(--color-ds-text-muted)" />
               <span className="font-semibold text-sm truncate">{trip.endAddress}</span>
             </div>
             <div className="flex items-center gap-3 text-xs text-ds-text-muted">
@@ -124,8 +130,16 @@ function TripRow({ trip, index }: { trip: TripSummary; index: number }) {
 
 export function TripsPage() {
   const [activeFilter, setActiveFilter] = useState<ModeFilter>('all');
+  const tripRecords = useTripHistoryStore((s) => s.trips);
 
-  const filtered = activeFilter === 'all' ? demoTrips : demoTrips.filter((t) => t.mode === activeFilter);
+  const allTrips = tripRecords.map(recordToSummary);
+  const filtered = activeFilter === 'all' ? allTrips : allTrips.filter((t) => t.mode === activeFilter);
+
+  // Stats from real data
+  const scoredTrips = allTrips.filter((t) => t.mode !== 'free');
+  const avgScore = scoredTrips.length > 0 ? Math.round(scoredTrips.reduce((s, t) => s + t.score, 0) / scoredTrips.length) : 0;
+  const totalDistance = allTrips.reduce((s, t) => s + t.distance, 0);
+  const totalDuration = allTrips.reduce((s, t) => s + t.duration, 0);
 
   // Group by date
   const grouped = filtered.reduce<Record<string, TripSummary[]>>((acc, trip) => {
@@ -144,7 +158,7 @@ export function TripsPage() {
           animate={{ opacity: 1, y: 0 }}
         >
           <h1 className="text-2xl font-bold">Fahrten</h1>
-          <p className="text-sm text-ds-text-muted mt-1">{demoTrips.length} Fahrten aufgezeichnet</p>
+          <p className="text-sm text-ds-text-muted mt-1">{allTrips.length} Fahrten aufgezeichnet</p>
         </motion.div>
 
         {/* Stats overview */}
@@ -155,15 +169,15 @@ export function TripsPage() {
           transition={{ delay: 0.1 }}
         >
           <GlassCard className="p-3 text-center">
-            <div className="text-xl font-bold text-ds-primary">85</div>
+            <div className="text-xl font-bold text-ds-primary">{avgScore}</div>
             <div className="text-xs text-ds-text-muted">Ø Score</div>
           </GlassCard>
           <GlassCard className="p-3 text-center">
-            <div className="text-xl font-bold">85.4 km</div>
+            <div className="text-xl font-bold">{formatDistance(totalDistance)}</div>
             <div className="text-xs text-ds-text-muted">Gesamt</div>
           </GlassCard>
           <GlassCard className="p-3 text-center">
-            <div className="text-xl font-bold">2h 25m</div>
+            <div className="text-xl font-bold">{formatDuration(totalDuration)}</div>
             <div className="text-xs text-ds-text-muted">Fahrzeit</div>
           </GlassCard>
         </motion.div>
@@ -208,7 +222,7 @@ export function TripsPage() {
 
         {filtered.length === 0 && (
           <div className="text-center py-16">
-            <div className="text-4xl mb-3">🚗</div>
+            <div className="mb-3 text-ds-text-muted"><IconCar size={40} /></div>
             <p className="text-ds-text-muted">Keine Fahrten in diesem Modus</p>
           </div>
         )}

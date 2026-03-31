@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layout } from '@/components/layout/Layout';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { ScoreRing, ModeBadge } from '@/components/ui/DataDisplays';
+import { IconGlobe, IconUsers, IconMap, IconMedalGold, IconMedalSilver, IconMedalBronze, IconUser } from '@/components/ui/Icons';
 import type { TripMode } from '@/stores/tripStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -27,19 +28,19 @@ interface SegmentRecord {
 
 const demoRankings: Record<string, LeaderboardEntry[]> = {
   global: [
-    { rank: 1, username: 'MaxRacer', avatar: '🏎️', score: 96, trips: 142, distance: 1245000 },
-    { rank: 2, username: 'SafeDriver42', avatar: '🛡️', score: 94, trips: 98, distance: 890000 },
-    { rank: 3, username: 'EcoQueen', avatar: '🌱', score: 93, trips: 201, distance: 1540000 },
-    { rank: 4, username: 'Du', avatar: '👤', score: 87, trips: 45, distance: 285000, isMe: true },
-    { rank: 5, username: 'NightRider', avatar: '🌙', score: 85, trips: 67, distance: 430000 },
-    { rank: 6, username: 'CurveMaster', avatar: '🔄', score: 83, trips: 89, distance: 567000 },
-    { rank: 7, username: 'SpeedDemon', avatar: '⚡', score: 79, trips: 112, distance: 920000 },
-    { rank: 8, username: 'ChillDrive', avatar: '😎', score: 76, trips: 34, distance: 187000 },
+    { rank: 1, username: 'MaxRacer', avatar: 'MR', score: 96, trips: 142, distance: 1245000 },
+    { rank: 2, username: 'SafeDriver42', avatar: 'SD', score: 94, trips: 98, distance: 890000 },
+    { rank: 3, username: 'EcoQueen', avatar: 'EQ', score: 93, trips: 201, distance: 1540000 },
+    { rank: 4, username: 'Du', avatar: 'DU', score: 87, trips: 45, distance: 285000, isMe: true },
+    { rank: 5, username: 'NightRider', avatar: 'NR', score: 85, trips: 67, distance: 430000 },
+    { rank: 6, username: 'CurveMaster', avatar: 'CM', score: 83, trips: 89, distance: 567000 },
+    { rank: 7, username: 'SpeedDemon', avatar: 'SP', score: 79, trips: 112, distance: 920000 },
+    { rank: 8, username: 'ChillDrive', avatar: 'CD', score: 76, trips: 34, distance: 187000 },
   ],
   friends: [
-    { rank: 1, username: 'MaxRacer', avatar: '🏎️', score: 96, trips: 142, distance: 1245000 },
-    { rank: 2, username: 'Du', avatar: '👤', score: 87, trips: 45, distance: 285000, isMe: true },
-    { rank: 3, username: 'NightRider', avatar: '🌙', score: 85, trips: 67, distance: 430000 },
+    { rank: 1, username: 'MaxRacer', avatar: 'MR', score: 96, trips: 142, distance: 1245000 },
+    { rank: 2, username: 'Du', avatar: 'DU', score: 87, trips: 45, distance: 285000, isMe: true },
+    { rank: 3, username: 'NightRider', avatar: 'NR', score: 85, trips: 67, distance: 430000 },
   ],
 };
 
@@ -53,19 +54,19 @@ const demoSegments: SegmentRecord[] = [
 
 type Tab = 'global' | 'friends' | 'segments';
 
-const tabs: { key: Tab; label: string; icon: string }[] = [
-  { key: 'global', label: 'Global', icon: '🌍' },
-  { key: 'friends', label: 'Freunde', icon: '👥' },
-  { key: 'segments', label: 'Strecken', icon: '🛣️' },
+const tabs: { key: Tab; label: string; icon: ReactNode }[] = [
+  { key: 'global', label: 'Global', icon: <IconGlobe size={16} /> },
+  { key: 'friends', label: 'Freunde', icon: <IconUsers size={16} /> },
+  { key: 'segments', label: 'Strecken', icon: <IconMap size={16} /> },
 ];
 
 // ─── Rank Entry Component ────────────────────────────────────────────────────
 
 function RankRow({ entry, index }: { entry: LeaderboardEntry; index: number }) {
   const getRankDecor = (rank: number) => {
-    if (rank === 1) return { bg: 'linear-gradient(135deg, #FFD700, #FFA500)', text: '🥇' };
-    if (rank === 2) return { bg: 'linear-gradient(135deg, #C0C0C0, #A0A0A0)', text: '🥈' };
-    if (rank === 3) return { bg: 'linear-gradient(135deg, #CD7F32, #A0522D)', text: '🥉' };
+    if (rank === 1) return { bg: 'linear-gradient(135deg, #FFD700, #FFA500)', icon: <IconMedalGold size={20} /> };
+    if (rank === 2) return { bg: 'linear-gradient(135deg, #C0C0C0, #A0A0A0)', icon: <IconMedalSilver size={20} /> };
+    if (rank === 3) return { bg: 'linear-gradient(135deg, #CD7F32, #A0522D)', icon: <IconMedalBronze size={20} /> };
     return null;
   };
 
@@ -83,14 +84,14 @@ function RankRow({ entry, index }: { entry: LeaderboardEntry; index: number }) {
       {/* Rank */}
       <div className="w-8 flex-shrink-0 text-center">
         {decor ? (
-          <span className="text-lg">{decor.text}</span>
+          <span>{decor.icon}</span>
         ) : (
           <span className="text-sm font-semibold text-ds-text-muted">#{entry.rank}</span>
         )}
       </div>
 
       {/* Avatar */}
-      <div className="w-10 h-10 rounded-full bg-ds-surface flex items-center justify-center text-xl flex-shrink-0">
+      <div className="w-10 h-10 rounded-full bg-ds-surface flex items-center justify-center text-xs font-bold tracking-tight flex-shrink-0 border border-ds-border/50">
         {entry.avatar}
       </div>
 
@@ -182,8 +183,8 @@ export function LeaderboardPage() {
         >
           <GlassCard glow className="p-5">
             <div className="flex items-center gap-5">
-              <div className="w-16 h-16 rounded-full bg-ds-primary/15 flex items-center justify-center text-3xl">
-                👤
+              <div className="w-16 h-16 rounded-full bg-ds-primary/15 flex items-center justify-center flex-shrink-0">
+                <IconUser size={32} color="var(--color-ds-primary)" />
               </div>
               <div className="flex-1">
                 <div className="text-sm text-ds-text-muted">Dein Rang</div>
