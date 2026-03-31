@@ -46,10 +46,12 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
   const profile = useProfileStore((s) => s.profile);
   const { position } = useGeolocation({ autoStart: true });
   const setUsers = useLiveStore((s) => s.setUsers);
+  const updateUser = useLiveStore((s) => s.updateUser);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const colorMapRef = useRef<Map<string, string>>(new Map());
   const nextColorIdx = useRef(1); // 0 is reserved for self
+  const wsConnectedRef = useRef(false);
 
   const assignColor = useCallback((userId: string): string => {
     const existing = colorMapRef.current.get(userId);
@@ -59,6 +61,50 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
     colorMapRef.current.set(userId, color);
     return color;
   }, []);
+
+  // Local self-user fallback — always show yourself even without WebSocket
+  useEffect(() => {
+    if (!authUser || !position) return;
+
+    // If WebSocket is connected and feeding data, server broadcasts include self — skip local fallback
+    if (wsConnectedRef.current) return;
+
+    const selfUser: LiveUser = {
+      id: authUser.id,
+      username: authUser.username,
+      initials: authUser.username.slice(0, 2).toUpperCase(),
+      color: USER_COLORS[0]!,
+      position: [position.lng, position.lat],
+      heading: position.heading ?? 0,
+      status: (statusOverride ?? 'idle') as 'idle' | 'driving',
+      speed: (position.speed ?? 0) * 3.6,
+      score: 0,
+      profilePicture: profile?.profilePicture,
+      isSelf: true,
+      route: route ?? undefined,
+      destination: destination ?? undefined,
+      lastUpdate: Date.now(),
+    };
+
+    // If store is empty or only has self → set as sole user
+    const current = useLiveStore.getState().users;
+    if (current.length === 0) {
+      setUsers([selfUser]);
+    } else {
+      // Update existing self entry with fresh position
+      const hasSelf = current.some((u) => u.id === authUser.id);
+      if (hasSelf) {
+        updateUser(authUser.id, {
+          position: selfUser.position,
+          heading: selfUser.heading,
+          speed: selfUser.speed,
+          status: selfUser.status,
+        });
+      } else {
+        setUsers([selfUser, ...current]);
+      }
+    }
+  }, [position, authUser?.id, statusOverride, route, destination, profile?.profilePicture, setUsers, updateUser]);
 
   // Connect WebSocket
   useEffect(() => {
@@ -78,6 +124,7 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'users' && Array.isArray(data.users)) {
+            wsConnectedRef.current = true;
             const serverUsers = data.users as ServerUser[];
             const liveUsers: LiveUser[] = serverUsers.map((su) => {
               const isSelf = su.id === authUser!.id;
@@ -105,6 +152,7 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
 
       ws.onclose = () => {
         wsRef.current = null;
+        wsConnectedRef.current = false;
         if (alive) {
           reconnectTimer.current = setTimeout(connect, 3000);
         }
