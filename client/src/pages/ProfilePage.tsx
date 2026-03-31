@@ -596,13 +596,13 @@ export function ProfilePage() {
         {showLogout && (
           <>
             <motion.div
-              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               onClick={() => setShowLogout(false)}
             />
             <motion.div
-              className="fixed bottom-0 left-0 right-0 z-50 glass rounded-t-3xl p-6 space-y-4 text-center"
+              className="fixed bottom-0 left-0 right-0 z-[60] glass rounded-t-3xl p-6 space-y-4 text-center"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
