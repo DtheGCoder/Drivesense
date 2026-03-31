@@ -4,6 +4,7 @@ import { useMap, type RouteStep, type RouteResult } from '@/components/map/MapPr
 import { useGeolocation } from '@/hooks/useGeolocation';
 import { useProfileStore } from '@/stores/profileStore';
 import { useSavedPlacesStore, PLACE_ICONS, PLACE_COLORS, type PlaceIconKey } from '@/stores/savedPlacesStore';
+import { type SpeedCamera, type CameraType } from '@/stores/radarStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -189,6 +190,70 @@ function distanceToPolyline(point: [number, number], coords: [number, number][])
   return min;
 }
 
+// ─── Speed Camera Route Check ────────────────────────────────────────────────
+
+async function fetchRouteCameras(coords: [number, number][]): Promise<SpeedCamera[]> {
+  if (coords.length < 2) return [];
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const [lng, lat] of coords) {
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+  }
+  const centerLat = (minLat + maxLat) / 2;
+  const centerLng = (minLng + maxLng) / 2;
+  const latDist = (maxLat - minLat) * 110540;
+  const lngDist = (maxLng - minLng) * 111320 * Math.cos(centerLat * Math.PI / 180);
+  const radiusM = Math.min(Math.max(Math.max(latDist, lngDist) / 2 + 500, 5000), 25000);
+
+  const query = `[out:json][timeout:25];
+(
+  node["highway"="speed_camera"](around:${radiusM},${centerLat},${centerLng});
+  node["enforcement"](around:${radiusM},${centerLat},${centerLng});
+);
+out body;`;
+
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const seen = new Set<number>();
+    const cameras: SpeedCamera[] = [];
+    for (const el of data.elements ?? []) {
+      if (el.type !== 'node' || seen.has(el.id)) continue;
+      seen.add(el.id);
+      const tags = (el.tags ?? {}) as Record<string, string>;
+      const enforcement = tags['enforcement'] ?? '';
+      let type: CameraType = 'fixed';
+      if (enforcement === 'traffic_signals') type = 'traffic_signals';
+      else if (enforcement === 'average_speed') type = 'section';
+      cameras.push({
+        id: el.id,
+        lat: el.lat,
+        lng: el.lon,
+        type,
+        maxspeed: tags['maxspeed'] ? parseInt(tags['maxspeed'], 10) || undefined : undefined,
+      });
+    }
+    return cameras;
+  } catch {
+    return [];
+  }
+}
+
+function countCamerasOnRoute(cameras: SpeedCamera[], coords: [number, number][], maxDist = 200): number {
+  let count = 0;
+  for (const cam of cameras) {
+    if (distanceToPolyline([cam.lng, cam.lat], coords) <= maxDist) count++;
+  }
+  return count;
+}
+
 // ─── Format Helpers ──────────────────────────────────────────────────────────
 
 function formatDuration(seconds: number): string {
@@ -263,6 +328,11 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   // POI
   const [poiResults, setPoiResults] = useState<SearchResult[]>([]);
   const [selectedPoiCategory, setSelectedPoiCategory] = useState<PoiCategory | null>(null);
+
+  // Speed camera state
+  const [routeCameras, setRouteCameras] = useState<SpeedCamera[]>([]);
+  const [routeCameraCount, setRouteCameraCount] = useState(0);
+  const [isFetchingCameras, setIsFetchingCameras] = useState(false);
 
   // Saved places
   const { places: savedPlaces, addPlace, removePlace } = useSavedPlacesStore();
@@ -392,6 +462,24 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     if (startPoint && endPoint) calculateRoute();
   }, [startPoint, endPoint, waypoints, calculateRoute]);
 
+  // Fetch speed cameras along route
+  useEffect(() => {
+    if (!routeInfo) {
+      setRouteCameras([]);
+      setRouteCameraCount(0);
+      return;
+    }
+    let cancelled = false;
+    setIsFetchingCameras(true);
+    fetchRouteCameras(routeInfo.coordinates).then((cameras) => {
+      if (cancelled) return;
+      setRouteCameras(cameras);
+      setRouteCameraCount(countCamerasOnRoute(cameras, routeInfo.coordinates));
+      setIsFetchingCameras(false);
+    });
+    return () => { cancelled = true; };
+  }, [routeInfo]);
+
   // Select an alternative route (swap with main)
   const selectAlternativeRoute = useCallback((altIndex: number) => {
     if (!routeInfo || altIndex >= alternativeRoutes.length) return;
@@ -415,6 +503,23 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     setAlternativeRoutes(newAlts);
     drawAlternativeRoutes(newAlts.map((r) => r.coordinates));
   }, [routeInfo, alternativeRoutes, drawRoute, drawAlternativeRoutes]);
+
+  // Avoid cameras — select alternative route with fewest cameras
+  const handleAvoidCameras = useCallback(() => {
+    if (alternativeRoutes.length === 0 || routeCameras.length === 0) return;
+    let bestIdx = -1;
+    let bestCount = routeCameraCount;
+    for (let i = 0; i < alternativeRoutes.length; i++) {
+      const count = countCamerasOnRoute(routeCameras, alternativeRoutes[i]!.coordinates);
+      if (count < bestCount) {
+        bestCount = count;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      selectAlternativeRoute(bestIdx);
+    }
+  }, [alternativeRoutes, routeCameras, routeCameraCount, selectAlternativeRoute]);
 
   // Navigation: track current position against route steps + off-route detection
   useEffect(() => {
@@ -753,6 +858,28 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
               </div>
             </div>
 
+            {/* Speed camera info */}
+            {(routeCameraCount > 0 || isFetchingCameras) && (
+              <div className="flex items-center justify-between px-5 py-2.5 border-t border-white/5">
+                <div className="flex items-center gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="1" fill="var(--color-ds-danger)" />
+                  </svg>
+                  <span className="text-sm text-white/70">
+                    {isFetchingCameras ? 'Blitzer werden geladen…' : `${routeCameraCount} Blitzer auf der Route`}
+                  </span>
+                </div>
+                {routeCameraCount > 0 && alternativeRoutes.length > 0 && (
+                  <button
+                    className="text-[10px] text-ds-primary font-medium px-2.5 py-1 rounded-full bg-ds-primary/10 active:bg-ds-primary/20"
+                    onClick={handleAvoidCameras}
+                  >
+                    Umfahren
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Alternative routes */}
             {alternativeRoutes.length > 0 && (
               <div className="border-t border-white/5">
@@ -764,6 +891,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                     : timeDiff > 0
                       ? `+${formatDuration(timeDiff)}`
                       : `${formatDuration(Math.abs(timeDiff))} schneller`;
+                  const altCameraCount = routeCameras.length > 0 ? countCamerasOnRoute(routeCameras, alt.coordinates) : 0;
                   return (
                     <button
                       key={i}
@@ -775,6 +903,12 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                         <span className="text-sm text-white/70">{formatDistance(alt.distance)}</span>
                         <span className="text-xs text-white/40 ml-2">{formatDuration(alt.duration)}</span>
                       </div>
+                      {altCameraCount > 0 && (
+                        <span className="text-[10px] text-ds-danger/70 font-medium flex items-center gap-0.5">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /></svg>
+                          {altCameraCount}
+                        </span>
+                      )}
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                         timeDiff > 60 ? 'text-amber-400 bg-amber-400/10' : timeDiff < -60 ? 'text-emerald-400 bg-emerald-400/10' : 'text-white/50 bg-white/5'
                       }`}>

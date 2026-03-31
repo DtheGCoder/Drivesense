@@ -22,6 +22,8 @@ import { RouteSearch } from '@/components/map/RouteSearch';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { useRadarStore } from '@/stores/radarStore';
 import { useLiveTracking } from '@/hooks/useLiveTracking';
+import mapboxgl from 'mapbox-gl';
+import { useLiveStore, type LiveUser } from '@/stores/liveStore';
 
 // ─── Mode Selector Modal ─────────────────────────────────────────────────────
 
@@ -153,11 +155,38 @@ function EndTripSheet({ isOpen, onConfirm, onCancel }: { isOpen: boolean; onConf
   );
 }
 
+// ─── User Marker (for drive page) ────────────────────────────────────────────
+
+function createDriveMarkerElement(user: LiveUser): HTMLDivElement {
+  const el = document.createElement('div');
+  el.style.cursor = 'pointer';
+  const isSelf = user.isSelf === true;
+  const borderColor = isSelf ? '#00f0ff' : user.color;
+  const isDriving = user.status === 'driving';
+  const pulseRing = isDriving
+    ? `<div style="position:absolute;inset:-6px;border-radius:50%;background:${borderColor}25;animation:pulse-ring 2s ease-out infinite;"></div>`
+    : isSelf
+    ? `<div style="position:absolute;inset:-4px;border-radius:50%;border:2px solid ${borderColor}40;animation:pulse-ring 3s ease-out infinite;"></div>`
+    : '';
+  const avatarContent = user.profilePicture
+    ? `<img src="${user.profilePicture}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`
+    : `<span style="font-size:12px;font-weight:700;color:${borderColor};letter-spacing:0.5px;">${user.initials}</span>`;
+  const label = isDriving ? `${Math.round(user.speed)} km/h` : isSelf ? 'Du' : '';
+  el.innerHTML = `
+    <div style="position:relative;width:40px;height:40px;">
+      ${pulseRing}
+      <div style="position:absolute;inset:0;border-radius:50%;background:${isDriving ? borderColor + '20' : '#1a1a2e'};border:2.5px solid ${borderColor};display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 0 12px ${borderColor}40, 0 2px 8px rgba(0,0,0,0.5);">${avatarContent}</div>
+      ${label ? `<div style="position:absolute;bottom:-4px;left:50%;transform:translateX(-50%);background:${borderColor};color:#0a0a0f;padding:1px 5px;border-radius:6px;font-size:9px;font-weight:700;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.4);">${label}</div>` : ''}
+    </div>
+  `;
+  return el;
+}
+
 // ─── Main Drive Page ─────────────────────────────────────────────────────────
 
 export function DrivePage() {
   const navigate = useNavigate();
-  const { flyTo, drawBreadcrumb, clearBreadcrumb, clearRoute } = useMap();
+  const { map, loaded, flyTo, drawBreadcrumb, clearBreadcrumb, clearRoute } = useMap();
   // Subscribe to individual reactive values from trip store
   const tripStatus = useTripStore((s) => s.status);
   const tripMode = useTripStore((s) => s.mode);
@@ -180,6 +209,7 @@ export function DrivePage() {
   const nearbyCamera = useRadarStore((s) => s.nearbyCamera);
   const checkProximity = useRadarStore((s) => s.checkProximity);
   const fetchCameras = useRadarStore((s) => s.fetchCameras);
+  const users = useLiveStore((s) => s.users);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showRouteSearch, setShowRouteSearch] = useState(false);
@@ -199,6 +229,7 @@ export function DrivePage() {
   const maxGForceRef = useRef<number>(0);
   const scoreRef = useRef<number>(100);
   const speedSamplesRef = useRef<number[]>([]);
+  const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
 
   const isRecording = tripStatus === 'recording';
   const isIdle = tripStatus === 'idle';
@@ -207,6 +238,38 @@ export function DrivePage() {
   useLiveTracking({
     status: isRecording ? 'driving' : 'idle',
   });
+
+  // Render user markers on the map
+  useEffect(() => {
+    if (!map || !loaded) return;
+    const currentIds = new Set(users.map((u) => u.id));
+    for (const [id, marker] of markersRef.current) {
+      if (!currentIds.has(id)) {
+        marker.remove();
+        markersRef.current.delete(id);
+      }
+    }
+    for (const user of users) {
+      const existing = markersRef.current.get(user.id);
+      if (existing) {
+        existing.setLngLat(user.position);
+        existing.setRotation(user.heading);
+      } else {
+        const el = createDriveMarkerElement(user);
+        const marker = new mapboxgl.Marker({ element: el, rotation: user.heading, rotationAlignment: 'map' })
+          .setLngLat(user.position)
+          .addTo(map);
+        markersRef.current.set(user.id, marker);
+      }
+    }
+  }, [map, loaded, users]);
+
+  useEffect(() => {
+    return () => {
+      for (const marker of markersRef.current.values()) marker.remove();
+      markersRef.current.clear();
+    };
+  }, []);
 
   // Format elapsed time
   const formatTime = (ms: number) => {
@@ -445,15 +508,20 @@ export function DrivePage() {
     }, 2000);
   }, [navigate, flyTo, clearBreadcrumb, clearRoute, stopTracking, addTrip, user, calculateFuelCost]);
 
-  // Fly to user's GPS position when first acquired, clear route on unmount
+  // Fly to user's GPS position when first acquired
   const hasFlyToInitial = useRef(false);
   useEffect(() => {
     if (position && !hasFlyToInitial.current) {
       hasFlyToInitial.current = true;
       flyTo({ center: [position.lng, position.lat], zoom: 15, pitch: 50, bearing: -20, duration: 2000 });
     }
+  }, [position, flyTo]);
+
+  // Clear breadcrumb + route only on unmount
+  useEffect(() => {
     return () => { clearBreadcrumb(); clearRoute(); };
-  }, [position, flyTo, clearBreadcrumb, clearRoute]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="fixed inset-0">
@@ -989,7 +1057,7 @@ export function DrivePage() {
         )}
       </AnimatePresence>
 
-      <BottomNav />
+      {!isRecording && <BottomNav />}
     </div>
   );
 }
