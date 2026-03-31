@@ -698,13 +698,13 @@ export function DrivePage() {
           <motion.div
             key="recording-hud"
             className={`absolute bottom-0 left-0 right-0 z-20 ${showRouteSearch ? 'pointer-events-none' : ''}`}
-            style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
+            style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
             initial={{ opacity: 0, y: 100 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           >
-            <div className="px-4 pb-4 space-y-3 pointer-events-auto">
+            <div className="px-4 pb-6 space-y-3 pointer-events-auto">
               {/* HUD widgets — rendered by order & visibility */}
               {(() => {
                 const visible = [...hudWidgets].filter((w) => w.visible).sort((a, b) => a.order - b.order);
