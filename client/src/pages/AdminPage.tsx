@@ -66,15 +66,15 @@ function CreateUserSheet({ isOpen, onClose, onCreated }: { isOpen: boolean; onCl
       {isOpen && (
         <>
           <motion.div
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={onClose}
           />
           <motion.div
-            className="fixed bottom-0 left-0 right-0 z-50 glass rounded-t-3xl"
+            className="fixed bottom-0 left-0 right-0 z-[60] glass rounded-t-3xl"
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
+            style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
           >
             <div className="p-6 space-y-4">
               <div className="w-10 h-1 bg-ds-border rounded-full mx-auto" />
