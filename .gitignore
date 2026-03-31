@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnp.*
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Build output
+server/dist/
+client/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+
+# Docker volumes (local)
+postgres_data/
+redis_data/

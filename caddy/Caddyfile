@@ -1,0 +1,38 @@
+drivesense.yourdomain.com {
+    # Automatic HTTPS with Let's Encrypt (default in Caddy)
+
+    # Security headers (supplement @fastify/helmet)
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(self), accelerometer=(self), gyroscope=(self), camera=(), microphone=(), payment=()"
+    }
+
+    # WebSocket upgrade (must come before general /api/* handler)
+    handle /api/v1/live/ws {
+        reverse_proxy localhost:3000
+    }
+
+    # API reverse proxy
+    handle /api/* {
+        reverse_proxy localhost:3000
+    }
+
+    # Health check
+    handle /health {
+        reverse_proxy localhost:3000
+    }
+
+    # Frontend static files
+    handle {
+        root * /var/www/drivesense/client/dist
+        try_files {path} /index.html
+        file_server
+
+        # Cache static assets aggressively
+        @static path *.js *.css *.woff2 *.png *.svg *.webp *.ico
+        header @static Cache-Control "public, max-age=31536000, immutable"
+    }
+}
