@@ -8,13 +8,13 @@ git pull origin main
 
 # ─── Client ──────────────────────────────────────────────────────────────────
 cd client
-npm install --omit=dev
+npm install
 npx vite build
 cd ..
 
 # ─── Server ──────────────────────────────────────────────────────────────────
 cd server
-npm install --omit=dev
+npm install
 npx tsc
 cd ..
 
