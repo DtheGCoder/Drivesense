@@ -14,9 +14,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'https://anonymchat.digital:787',
+        target: 'http://localhost:788',
         changeOrigin: true,
-        secure: false,
         ws: true,
       },
     },

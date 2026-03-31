@@ -32,11 +32,8 @@ function getWsUrl(): string {
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 interface LiveTrackingOptions {
-  /** Current route coordinates (when navigating) */
   route?: [number, number][] | null;
-  /** Destination name */
   destination?: string | null;
-  /** User status override */
   status?: 'idle' | 'driving';
 }
 
@@ -46,12 +43,10 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
   const profile = useProfileStore((s) => s.profile);
   const { position } = useGeolocation({ autoStart: true });
   const setUsers = useLiveStore((s) => s.setUsers);
-  const updateUser = useLiveStore((s) => s.updateUser);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const colorMapRef = useRef<Map<string, string>>(new Map());
-  const nextColorIdx = useRef(1); // 0 is reserved for self
-  const wsConnectedRef = useRef(false);
+  const nextColorIdx = useRef(1);
 
   const assignColor = useCallback((userId: string): string => {
     const existing = colorMapRef.current.get(userId);
@@ -62,22 +57,10 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
     return color;
   }, []);
 
-  // Local self-user fallback — always show yourself even without WebSocket
-  useEffect(() => {
-    if (!authUser || !position) {
-      console.log('[LiveTracking] fallback skip — authUser:', !!authUser, 'position:', !!position);
-      return;
-    }
-
-    // If WebSocket is connected and feeding data, server broadcasts include self — skip local fallback
-    if (wsConnectedRef.current) {
-      console.log('[LiveTracking] WS connected, server handles user list');
-      return;
-    }
-
-    console.log('[LiveTracking] local fallback — adding self user at', [position.lng, position.lat]);
-
-    const selfUser: LiveUser = {
+  // Build a self-user LiveUser from local data
+  const buildSelfUser = useCallback((): LiveUser | null => {
+    if (!authUser || !position) return null;
+    return {
       id: authUser.id,
       username: authUser.username,
       initials: authUser.username.slice(0, 2).toUpperCase(),
@@ -93,31 +76,28 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
       destination: destination ?? undefined,
       lastUpdate: Date.now(),
     };
+  }, [authUser, position, statusOverride, profile?.profilePicture, route, destination]);
 
-    // If store is empty or only has self → set as sole user
+  // Always ensure self is visible — runs on every GPS update
+  useEffect(() => {
+    const self = buildSelfUser();
+    if (!self) return;
+
     const current = useLiveStore.getState().users;
-    if (current.length === 0) {
-      setUsers([selfUser]);
+    const hasSelf = current.some((u) => u.isSelf);
+
+    if (!hasSelf) {
+      // No self in the store yet — add it
+      setUsers([self, ...current.filter((u) => u.id !== self.id)]);
     } else {
-      // Update existing self entry with fresh position
-      const hasSelf = current.some((u) => u.id === authUser.id);
-      if (hasSelf) {
-        updateUser(authUser.id, {
-          position: selfUser.position,
-          heading: selfUser.heading,
-          speed: selfUser.speed,
-          status: selfUser.status,
-        });
-      } else {
-        setUsers([selfUser, ...current]);
-      }
+      // Update self position in-place (don't overwrite other users from WS)
+      setUsers(current.map((u) => u.isSelf ? { ...u, position: self.position, heading: self.heading, speed: self.speed, status: self.status, lastUpdate: Date.now() } : u));
     }
-  }, [position, authUser?.id, statusOverride, route, destination, profile?.profilePicture, setUsers, updateUser]);
+  }, [position, buildSelfUser, setUsers]);
 
   // Connect WebSocket
   useEffect(() => {
     if (!authUser) return;
-
     const token = getToken();
     if (!token) return;
 
@@ -125,20 +105,13 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
 
     function connect() {
       if (!alive) return;
-      console.log('[LiveTracking] WS connecting to', getWsUrl().replace(/token=.*/, 'token=***'));
       const ws = new WebSocket(getWsUrl());
       wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('[LiveTracking] WS opened');
-      };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('[LiveTracking] WS message:', data.type, 'users:', data.users?.length);
           if (data.type === 'users' && Array.isArray(data.users)) {
-            wsConnectedRef.current = true;
             const serverUsers = data.users as ServerUser[];
             const liveUsers: LiveUser[] = serverUsers.map((su) => {
               const isSelf = su.id === authUser!.id;
@@ -159,24 +132,29 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
                 lastUpdate: su.lastUpdate,
               };
             });
-            setUsers(liveUsers);
+
+            // Always ensure self is in the list with local GPS position
+            const self = buildSelfUser();
+            const hasSelfFromServer = liveUsers.some((u) => u.isSelf);
+            if (self && hasSelfFromServer) {
+              // Merge: use server data for others, but override self position with local GPS
+              setUsers(liveUsers.map((u) => u.isSelf ? { ...u, position: self.position, heading: self.heading, speed: self.speed } : u));
+            } else if (self && !hasSelfFromServer) {
+              // Server doesn't include self (shouldn't happen, but safeguard)
+              setUsers([self, ...liveUsers]);
+            } else {
+              setUsers(liveUsers);
+            }
           }
         } catch { /* ignore */ }
       };
 
-      ws.onclose = (ev) => {
-        console.log('[LiveTracking] WS closed:', ev.code, ev.reason);
+      ws.onclose = () => {
         wsRef.current = null;
-        wsConnectedRef.current = false;
-        if (alive) {
-          reconnectTimer.current = setTimeout(connect, 3000);
-        }
+        if (alive) reconnectTimer.current = setTimeout(connect, 3000);
       };
 
-      ws.onerror = (ev) => {
-        console.error('[LiveTracking] WS error:', ev);
-        ws.close();
-      };
+      ws.onerror = () => { ws.close(); };
     }
 
     connect();
@@ -190,11 +168,10 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
 
-  // Send position updates
+  // Send position updates to server
   useEffect(() => {
     if (!position || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
-    const msg: Record<string, unknown> = {
+    wsRef.current.send(JSON.stringify({
       type: 'position',
       position: [position.lng, position.lat],
       heading: position.heading ?? 0,
@@ -202,8 +179,6 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
       status: statusOverride ?? 'idle',
       route: route ?? null,
       destination: destination ?? null,
-    };
-
-    wsRef.current.send(JSON.stringify(msg));
+    }));
   }, [position, route, destination, statusOverride]);
 }
