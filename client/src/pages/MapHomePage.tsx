@@ -85,7 +85,7 @@ function UserCard({ user, onClose, onFocus }: { user: LiveUser; onClose: () => v
 
   return (
     <motion.div
-      className="absolute bottom-28 left-4 right-4 z-30 pointer-events-auto"
+      className="absolute bottom-36 left-4 right-4 z-30 pointer-events-auto touch-auto"
       initial={{ opacity: 0, y: 40 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 40 }}
@@ -342,7 +342,7 @@ export function MapHomePage() {
       {/* Search button (when search is closed) */}
       {!showSearch && (
         <motion.button
-          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left pointer-events-auto"
+          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left pointer-events-auto touch-auto"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           whileTap={{ scale: 0.98 }}
@@ -358,7 +358,7 @@ export function MapHomePage() {
       {/* GPS Permission Banner */}
       {!showSearch && (gpsStatus === 'requesting_permission' || gpsStatus === 'error_denied' || gpsStatus === 'unsupported' || gpsStatus === 'initializing') && (
         <motion.div
-          className="absolute top-20 left-4 right-4 z-20 mt-safe-top glass rounded-2xl p-4 pointer-events-auto"
+          className="absolute top-20 left-4 right-4 z-20 mt-safe-top glass rounded-2xl p-4 pointer-events-auto touch-auto"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
@@ -392,7 +392,7 @@ export function MapHomePage() {
       {/* Driver list toggle button (bottom) */}
       {!showSearch && (
         <motion.button
-          className="absolute bottom-24 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto"
+          className="absolute bottom-32 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto touch-auto"
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           whileTap={{ scale: 0.9 }}
@@ -413,7 +413,7 @@ export function MapHomePage() {
       <AnimatePresence>
         {showDriverList && !showSearch && (
           <motion.div
-            className="absolute bottom-20 left-4 right-4 z-20 glass rounded-2xl overflow-hidden pointer-events-auto"
+            className="absolute bottom-28 left-4 right-4 z-20 glass rounded-2xl overflow-hidden pointer-events-auto touch-auto"
             initial={{ opacity: 0, y: 30, height: 0 }}
             animate={{ opacity: 1, y: 0, height: 'auto' }}
             exit={{ opacity: 0, y: 30, height: 0 }}

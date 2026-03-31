@@ -27,28 +27,11 @@ interface SegmentRecord {
 // ─── Demo Data ───────────────────────────────────────────────────────────────
 
 const demoRankings: Record<string, LeaderboardEntry[]> = {
-  global: [
-    { rank: 1, username: 'MaxRacer', avatar: 'MR', score: 96, trips: 142, distance: 1245000 },
-    { rank: 2, username: 'SafeDriver42', avatar: 'SD', score: 94, trips: 98, distance: 890000 },
-    { rank: 3, username: 'EcoQueen', avatar: 'EQ', score: 93, trips: 201, distance: 1540000 },
-    { rank: 4, username: 'Du', avatar: 'DU', score: 87, trips: 45, distance: 285000, isMe: true },
-    { rank: 5, username: 'NightRider', avatar: 'NR', score: 85, trips: 67, distance: 430000 },
-    { rank: 6, username: 'CurveMaster', avatar: 'CM', score: 83, trips: 89, distance: 567000 },
-    { rank: 7, username: 'SpeedDemon', avatar: 'SP', score: 79, trips: 112, distance: 920000 },
-    { rank: 8, username: 'ChillDrive', avatar: 'CD', score: 76, trips: 34, distance: 187000 },
-  ],
-  friends: [
-    { rank: 1, username: 'MaxRacer', avatar: 'MR', score: 96, trips: 142, distance: 1245000 },
-    { rank: 2, username: 'Du', avatar: 'DU', score: 87, trips: 45, distance: 285000, isMe: true },
-    { rank: 3, username: 'NightRider', avatar: 'NR', score: 85, trips: 67, distance: 430000 },
-  ],
+  global: [],
+  friends: [],
 };
 
-const demoSegments: SegmentRecord[] = [
-  { segmentName: 'A5 Frankfurt – Bad Homburg', record: { username: 'SpeedDemon', time: 312, mode: 'racing' }, myBest: 348 },
-  { segmentName: 'Berger Straße Komplett', record: { username: 'Du', time: 420, mode: 'driving_school' } },
-  { segmentName: 'Sachsenhausen Rundkurs', record: { username: 'EcoQueen', time: 540, mode: 'eco' }, myBest: 590 },
-];
+const demoSegments: SegmentRecord[] = [];
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
 
@@ -188,10 +171,10 @@ export function LeaderboardPage() {
               </div>
               <div className="flex-1">
                 <div className="text-sm text-ds-text-muted">Dein Rang</div>
-                <div className="text-3xl font-black text-ds-primary">#4</div>
-                <div className="text-xs text-ds-text-muted mt-0.5">Top 5% aller Fahrer</div>
+                <div className="text-3xl font-black text-ds-text-muted">—</div>
+                <div className="text-xs text-ds-text-muted mt-0.5">Starte deine erste Fahrt</div>
               </div>
-              <ScoreRing score={87} size={72} strokeWidth={5} label="Score" />
+              <ScoreRing score={0} size={72} strokeWidth={5} label="Score" />
             </div>
           </GlassCard>
         </motion.div>
@@ -229,9 +212,15 @@ export function LeaderboardPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              {demoSegments.map((seg, i) => (
-                <SegmentRow key={seg.segmentName} segment={seg} index={i} />
-              ))}
+              {demoSegments.length > 0 ? (
+                demoSegments.map((seg, i) => (
+                  <SegmentRow key={seg.segmentName} segment={seg} index={i} />
+                ))
+              ) : (
+                <div className="text-center py-12 text-ds-text-muted text-sm">
+                  Noch keine Streckenrekorde vorhanden.
+                </div>
+              )}
             </motion.div>
           ) : (
             <motion.div
@@ -241,9 +230,15 @@ export function LeaderboardPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              {(demoRankings[activeTab] ?? []).map((entry, i) => (
-                <RankRow key={entry.username} entry={entry} index={i} />
-              ))}
+              {(demoRankings[activeTab] ?? []).length > 0 ? (
+                (demoRankings[activeTab] ?? []).map((entry, i) => (
+                  <RankRow key={entry.username} entry={entry} index={i} />
+                ))
+              ) : (
+                <div className="text-center py-12 text-ds-text-muted text-sm">
+                  Noch keine Fahrer im Ranking.
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

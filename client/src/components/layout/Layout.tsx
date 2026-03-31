@@ -19,17 +19,23 @@ export function Layout({ children, showNav = true, fullScreen = false, mapMode =
       )}
 
       {/* Page content */}
-      <AnimatePresence mode="wait">
-        <motion.main
-          className={`flex-1 relative z-[2] overflow-hidden ${mapMode ? 'pointer-events-none' : ''} ${fullScreen ? '' : `px-4 pt-safe-top ${showNav ? 'pb-[calc(80px+var(--spacing-safe-bottom))]' : ''}`}`}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-        >
+      {mapMode ? (
+        <div className="flex-1 relative z-[2] pointer-events-none touch-none overflow-hidden">
           {children}
-        </motion.main>
-      </AnimatePresence>
+        </div>
+      ) : (
+        <AnimatePresence mode="wait">
+          <motion.main
+            className={`flex-1 relative z-[2] ${fullScreen ? '' : `px-4 pt-safe-top ${showNav ? 'pb-[calc(80px+var(--spacing-safe-bottom))]' : ''}`}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+          >
+            {children}
+          </motion.main>
+        </AnimatePresence>
+      )}
 
       {showNav && <BottomNav />}
     </div>
