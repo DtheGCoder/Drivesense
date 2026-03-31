@@ -590,7 +590,7 @@ export function ProfilePage() {
           DriveSense v1.0.0
         </div>
 
-        <div className="h-20" />
+        <div className="h-28" />
 
         {/* Logout confirmation */}
         {showLogout && (

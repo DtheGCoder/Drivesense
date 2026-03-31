@@ -85,7 +85,7 @@ function UserCard({ user, onClose, onFocus }: { user: LiveUser; onClose: () => v
 
   return (
     <motion.div
-      className="absolute bottom-36 left-4 right-4 z-30 pointer-events-auto touch-auto"
+      className="absolute bottom-36 left-4 right-4 z-30 pointer-events-auto"
       initial={{ opacity: 0, y: 40 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 40 }}
@@ -341,26 +341,21 @@ export function MapHomePage() {
 
       {/* Search button (when search is closed) */}
       {!showSearch && (
-        <motion.button
-          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left pointer-events-auto touch-auto"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          whileTap={{ scale: 0.98 }}
+        <button
+          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left pointer-events-auto"
           onClick={() => setShowSearch(true)}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           <span className="text-sm text-ds-text-muted">Wohin möchtest du fahren?</span>
-        </motion.button>
+        </button>
       )}
 
       {/* GPS Permission Banner */}
       {!showSearch && (gpsStatus === 'requesting_permission' || gpsStatus === 'error_denied' || gpsStatus === 'unsupported' || gpsStatus === 'initializing') && (
-        <motion.div
-          className="absolute top-20 left-4 right-4 z-20 mt-safe-top glass rounded-2xl p-4 pointer-events-auto touch-auto"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
+        <div
+          className="absolute top-20 left-4 right-4 z-20 mt-safe-top glass rounded-2xl p-4 pointer-events-auto"
         >
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-full bg-ds-primary/15 flex items-center justify-center flex-shrink-0">
@@ -386,16 +381,13 @@ export function MapHomePage() {
               </button>
             </div>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Driver list toggle button (bottom) */}
       {!showSearch && (
-        <motion.button
-          className="absolute bottom-32 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto touch-auto"
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          whileTap={{ scale: 0.9 }}
+        <button
+          className="absolute bottom-32 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto"
           onClick={() => setShowDriverList(!showDriverList)}
         >
           <div className="relative">
@@ -406,14 +398,14 @@ export function MapHomePage() {
               </div>
             )}
           </div>
-        </motion.button>
+        </button>
       )}
 
       {/* Expandable driver list panel (bottom) */}
       <AnimatePresence>
         {showDriverList && !showSearch && (
           <motion.div
-            className="absolute bottom-28 left-4 right-4 z-20 glass rounded-2xl overflow-hidden pointer-events-auto touch-auto"
+            className="absolute bottom-28 left-4 right-4 z-20 glass rounded-2xl overflow-hidden pointer-events-auto"
             initial={{ opacity: 0, y: 30, height: 0 }}
             animate={{ opacity: 1, y: 0, height: 'auto' }}
             exit={{ opacity: 0, y: 30, height: 0 }}
