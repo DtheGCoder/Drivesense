@@ -12,7 +12,7 @@ interface LayoutProps {
 
 export function Layout({ children, showNav = true, fullScreen = false, mapMode = false }: LayoutProps) {
   return (
-    <div className="min-h-dvh flex flex-col relative">
+    <div className={`${mapMode ? 'h-dvh overflow-hidden' : 'min-h-dvh'} flex flex-col relative`}>
       {/* Semi-transparent backdrop — hides map slightly on non-map pages */}
       {!mapMode && (
         <div className="fixed inset-0 z-[1] bg-ds-bg/70 backdrop-blur-sm pointer-events-none" />
@@ -21,7 +21,7 @@ export function Layout({ children, showNav = true, fullScreen = false, mapMode =
       {/* Page content */}
       <AnimatePresence mode="wait">
         <motion.main
-          className={`flex-1 relative z-[2] ${mapMode ? 'pointer-events-none [&>*]:pointer-events-auto' : ''} ${fullScreen ? '' : `px-4 pt-safe-top ${showNav ? 'pb-[calc(80px+var(--spacing-safe-bottom))]' : ''}`}`}
+          className={`flex-1 relative z-[2] overflow-hidden ${mapMode ? 'pointer-events-none' : ''} ${fullScreen ? '' : `px-4 pt-safe-top ${showNav ? 'pb-[calc(80px+var(--spacing-safe-bottom))]' : ''}`}`}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}

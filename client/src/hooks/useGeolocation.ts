@@ -208,32 +208,68 @@ export function useGeolocation(options: UseGeolocationOptions = {}): UseGeolocat
       return;
     }
 
-    // Check permission state first to avoid re-prompting
+    // Check permission state first
     if (navigator.permissions) {
       navigator.permissions.query({ name: 'geolocation' }).then((result) => {
         if (!mountedRef.current) return;
         if (result.state === 'granted') {
-          // Permission already granted — start silently
           setStatus('granted');
           startWatch();
         } else if (result.state === 'denied') {
           setStatus('error_denied');
         } else {
-          // 'prompt' — show requesting status, then start
+          // 'prompt' — use getCurrentPosition to trigger the browser prompt
+          // (watchPosition sometimes silently fails on iOS without a prompt)
           setStatus('requesting_permission');
-          startWatch();
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              if (!mountedRef.current) return;
+              setPosition(toGeoPosition(pos));
+              setStatus('granted');
+              startWatch();
+            },
+            (err) => {
+              if (!mountedRef.current) return;
+              handleError(err);
+            },
+            { enableHighAccuracy: false, maximumAge: maxAge, timeout },
+          );
         }
       }).catch(() => {
-        // Permissions API failed — fall back to direct watch
+        // Permissions API failed — trigger prompt via getCurrentPosition
         setStatus('requesting_permission');
-        startWatch();
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (!mountedRef.current) return;
+            setPosition(toGeoPosition(pos));
+            setStatus('granted');
+            startWatch();
+          },
+          (err) => {
+            if (!mountedRef.current) return;
+            handleError(err);
+          },
+          { enableHighAccuracy: false, maximumAge: maxAge, timeout },
+        );
       });
     } else {
-      // No Permissions API — fall back
+      // No Permissions API (e.g. iOS Safari) — trigger prompt via getCurrentPosition
       setStatus('requesting_permission');
-      startWatch();
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!mountedRef.current) return;
+          setPosition(toGeoPosition(pos));
+          setStatus('granted');
+          startWatch();
+        },
+        (err) => {
+          if (!mountedRef.current) return;
+          handleError(err);
+        },
+        { enableHighAccuracy: false, maximumAge: maxAge, timeout },
+      );
     }
-  }, [startWatch]);
+  }, [startWatch, maxAge, timeout, toGeoPosition, handleError]);
 
   const stopTracking = useCallback(() => {
     if (watchHiRef.current !== null) {

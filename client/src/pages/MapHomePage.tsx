@@ -7,7 +7,7 @@ import { useLiveStore, type LiveUser, USER_COLORS } from '@/stores/liveStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTripHistoryStore } from '@/stores/tripHistoryStore';
-import { useGeolocation } from '@/hooks/useGeolocation';
+import { useGeolocation, getPermissionHint } from '@/hooks/useGeolocation';
 import { ScoreRing, ModeBadge } from '@/components/ui/DataDisplays';
 import { IconGauge, IconClock, IconRoute, IconTarget, IconUsers } from '@/components/ui/Icons';
 import { RouteSearch } from '@/components/map/RouteSearch';
@@ -85,7 +85,7 @@ function UserCard({ user, onClose, onFocus }: { user: LiveUser; onClose: () => v
 
   return (
     <motion.div
-      className="absolute bottom-28 left-4 right-4 z-30"
+      className="absolute bottom-28 left-4 right-4 z-30 pointer-events-auto"
       initial={{ opacity: 0, y: 40 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 40 }}
@@ -185,7 +185,7 @@ export function MapHomePage() {
   const authUser = useAuthStore((s) => s.user);
   const profile = useProfileStore((s) => s.profile);
   const getUserStats = useTripHistoryStore((s) => s.getUserStats);
-  const { position: selfPosition } = useGeolocation({ autoStart: true });
+  const { position: selfPosition, status: gpsStatus, startTracking } = useGeolocation({ autoStart: true });
   const [showSearch, setShowSearch] = useState(false);
   const [showDriverList, setShowDriverList] = useState(false);
 
@@ -342,7 +342,7 @@ export function MapHomePage() {
       {/* Search button (when search is closed) */}
       {!showSearch && (
         <motion.button
-          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left"
+          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left pointer-events-auto"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           whileTap={{ scale: 0.98 }}
@@ -355,10 +355,44 @@ export function MapHomePage() {
         </motion.button>
       )}
 
+      {/* GPS Permission Banner */}
+      {!showSearch && (gpsStatus === 'requesting_permission' || gpsStatus === 'error_denied' || gpsStatus === 'unsupported' || gpsStatus === 'initializing') && (
+        <motion.div
+          className="absolute top-20 left-4 right-4 z-20 mt-safe-top glass rounded-2xl p-4 pointer-events-auto"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-ds-primary/15 flex items-center justify-center flex-shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7z" />
+                <circle cx="12" cy="9" r="2.5" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-bold mb-1">
+                {gpsStatus === 'error_denied' ? 'Standort verweigert' : 'Standort benötigt'}
+              </h3>
+              <p className="text-xs text-ds-text-muted leading-relaxed">
+                {gpsStatus === 'error_denied'
+                  ? getPermissionHint()
+                  : 'DriveSense braucht deinen Standort, um die Karte und Navigation zu nutzen.'}
+              </p>
+              <button
+                className="mt-2 px-4 py-2 rounded-xl bg-ds-primary text-ds-bg text-xs font-bold w-full"
+                onClick={startTracking}
+              >
+                {gpsStatus === 'error_denied' ? 'Erneut versuchen' : 'Standort aktivieren'}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Driver list toggle button (bottom) */}
       {!showSearch && (
         <motion.button
-          className="absolute bottom-24 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center"
+          className="absolute bottom-24 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto"
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           whileTap={{ scale: 0.9 }}
@@ -379,7 +413,7 @@ export function MapHomePage() {
       <AnimatePresence>
         {showDriverList && !showSearch && (
           <motion.div
-            className="absolute bottom-20 left-4 right-4 z-20 glass rounded-2xl overflow-hidden"
+            className="absolute bottom-20 left-4 right-4 z-20 glass rounded-2xl overflow-hidden pointer-events-auto"
             initial={{ opacity: 0, y: 30, height: 0 }}
             animate={{ opacity: 1, y: 0, height: 'auto' }}
             exit={{ opacity: 0, y: 30, height: 0 }}
