@@ -366,12 +366,6 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     }
   }, [gpsPosition, flyTo]);
 
-  // Stop navigation
-  const stopNavigation = useCallback(() => {
-    setView('overview');
-    flyTo({ pitch: 30, zoom: 14, bearing: 0, duration: 1000 });
-  }, [flyTo]);
-
   // Handle close — single action, resets everything
   const handleClose = useCallback(() => {
     setStartPoint(null);
@@ -387,8 +381,9 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     setCurrentStepIndex(0);
     hasAutoFilledStart.current = false;
     clearRoute();
+    flyTo({ pitch: 30, zoom: 14, bearing: 0, duration: 1000 });
     onClose();
-  }, [clearRoute, onClose]);
+  }, [clearRoute, flyTo, onClose]);
 
   // Search POIs
   const handlePoiSearch = useCallback(async (category: PoiCategory) => {
@@ -501,7 +496,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
 
             <button
               className="w-full flex items-center justify-center gap-2 py-3.5 bg-ds-danger/15 text-ds-danger font-bold text-sm border-t border-white/5 active:bg-ds-danger/25 transition-colors"
-              onClick={() => { stopNavigation(); handleClose(); }}
+              onClick={handleClose}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
               Navigation beenden

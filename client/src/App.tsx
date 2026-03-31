@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { router } from '@/router';
 import { MapProvider, PersistentMapCanvas } from '@/components/map/MapProvider';
+import { SpeedCameraLayer } from '@/components/map/SpeedCameraLayer';
 import { useAuthStore } from '@/stores/authStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTripHistoryStore } from '@/stores/tripHistoryStore';
@@ -27,6 +28,7 @@ export function App() {
   return (
     <MapProvider>
       <PersistentMapCanvas />
+      <SpeedCameraLayer />
       <RouterProvider router={router} />
     </MapProvider>
   );

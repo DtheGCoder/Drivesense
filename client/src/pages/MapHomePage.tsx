@@ -396,11 +396,7 @@ export function MapHomePage() {
           onClick={() => setShowDriverList(!showDriverList)}
         >
           <div className="relative w-full h-full flex items-center justify-center">
-            {profile?.profilePicture ? (
-              <img src={profile.profilePicture} className="w-full h-full object-cover" alt="" />
-            ) : (
-              <IconUsers size={20} />
-            )}
+            <IconUsers size={20} />
             {users.filter((u) => u.status === 'driving').length > 0 && (
               <div className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-ds-success text-[9px] font-bold text-ds-bg flex items-center justify-center border border-ds-bg">
                 {users.filter((u) => u.status === 'driving').length}

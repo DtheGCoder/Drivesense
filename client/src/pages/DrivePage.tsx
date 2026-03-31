@@ -19,6 +19,8 @@ import { useAuthStore } from '@/stores/authStore';
 import { useGeolocation, type GeoPosition, getPermissionHint } from '@/hooks/useGeolocation';
 import { useHudStore } from '@/stores/hudStore';
 import { RouteSearch } from '@/components/map/RouteSearch';
+import { BottomNav } from '@/components/layout/BottomNav';
+import { useRadarStore } from '@/stores/radarStore';
 
 // ─── Mode Selector Modal ─────────────────────────────────────────────────────
 
@@ -172,6 +174,11 @@ export function DrivePage() {
   const setWidgetSize = useHudStore((s) => s.setWidgetSize);
   const reorderWidgets = useHudStore((s) => s.reorderWidgets);
   const resetHudDefaults = useHudStore((s) => s.resetDefaults);
+  const radarEnabled = useRadarStore((s) => s.enabled);
+  const setRadarEnabled = useRadarStore((s) => s.setEnabled);
+  const nearbyCamera = useRadarStore((s) => s.nearbyCamera);
+  const checkProximity = useRadarStore((s) => s.checkProximity);
+  const fetchCameras = useRadarStore((s) => s.fetchCameras);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showRouteSearch, setShowRouteSearch] = useState(false);
@@ -347,7 +354,13 @@ export function DrivePage() {
 
     prevSpeedRef.current = speedKmh;
     prevPositionRef.current = position;
-  }, [isRecording, position, flyTo, drawBreadcrumb, haversineDistance]);
+
+    // Check radar proximity
+    if (radarEnabled) {
+      fetchCameras([position.lng, position.lat]);
+      checkProximity(position.lat, position.lng, position.heading ?? undefined);
+    }
+  }, [isRecording, position, flyTo, drawBreadcrumb, haversineDistance, radarEnabled, fetchCameras, checkProximity]);
 
   const handleStartRecording = useCallback((mode: TripMode) => {
     const store = useTripStore.getState();
@@ -456,8 +469,25 @@ export function DrivePage() {
             <IconChevronLeft size={20} color="white" />
           </motion.button>
 
-          {/* Route search button (idle or recording) */}
+          {/* Action buttons */}
           <div className="flex items-center gap-2">
+            {/* Radar toggle */}
+            {!showRouteSearch && (
+              <motion.button
+                className={`w-10 h-10 rounded-full glass flex items-center justify-center ${radarEnabled ? 'ring-1 ring-ds-danger/50' : ''}`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setRadarEnabled(!radarEnabled)}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={radarEnabled ? '#ff3355' : 'white'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <circle cx="12" cy="12" r="4" />
+                  <circle cx="12" cy="12" r="1" fill={radarEnabled ? '#ff3355' : 'white'} />
+                </svg>
+              </motion.button>
+            )}
             {isRecording && !showRouteSearch && (
               <motion.button
                 className="w-10 h-10 rounded-full glass flex items-center justify-center"
@@ -546,6 +576,45 @@ export function DrivePage() {
         </AnimatePresence>
       </div>
 
+      {/* Radar Warning Banner */}
+      <AnimatePresence>
+        {isRecording && nearbyCamera && (
+          <motion.div
+            key="radar-warning"
+            className="absolute top-44 left-4 right-4 z-30 pointer-events-auto"
+            initial={{ opacity: 0, scale: 0.9, y: -10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: -10 }}
+          >
+            <div className="bg-ds-danger/20 backdrop-blur-xl rounded-2xl border border-ds-danger/30 p-4 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-ds-danger/15 flex items-center justify-center flex-shrink-0">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <circle cx="12" cy="12" r="4" />
+                  <circle cx="12" cy="12" r="1" fill="var(--color-ds-danger)" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-ds-danger">
+                  {nearbyCamera.type === 'fixed' ? 'Blitzer voraus' :
+                   nearbyCamera.type === 'red_light' || nearbyCamera.type === 'traffic_signals' ? 'Ampelblitzer voraus' :
+                   nearbyCamera.type === 'section' ? 'Streckenradar' :
+                   'Blitzer voraus'}
+                </div>
+                <div className="text-xs text-white/60 mt-0.5">
+                  {nearbyCamera.maxspeed ? `Tempolimit: ${nearbyCamera.maxspeed} km/h` : 'Geschwindigkeit anpassen'}
+                </div>
+              </div>
+              {nearbyCamera.maxspeed && (
+                <div className="w-12 h-12 rounded-full border-2 border-ds-danger flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-ds-danger">{nearbyCamera.maxspeed}</span>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Bottom Gradient Overlay */}
       <div className="absolute bottom-0 left-0 right-0 h-80 map-gradient-bottom pointer-events-none z-10" />
 
@@ -555,7 +624,7 @@ export function DrivePage() {
           <motion.div
             key="recording-hud"
             className={`absolute bottom-0 left-0 right-0 z-20 ${showRouteSearch ? 'pointer-events-none' : ''}`}
-            style={{ paddingBottom: showRouteSearch ? 'calc(160px + env(safe-area-inset-bottom, 0px))' : 'env(safe-area-inset-bottom, 16px)' }}
+            style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
             initial={{ opacity: 0, y: 100 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
@@ -734,7 +803,7 @@ export function DrivePage() {
           <motion.div
             key="idle-hud"
             className="absolute bottom-0 left-0 right-0 z-20"
-            style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
+            style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
@@ -816,11 +885,9 @@ export function DrivePage() {
       />
 
       {/* Route Search Overlay */}
-      <AnimatePresence>
-        {showRouteSearch && (
-          <RouteSearch key={routeSearchKeyRef.current} isOpen={showRouteSearch} onClose={() => setShowRouteSearch(false)} />
-        )}
-      </AnimatePresence>
+      {showRouteSearch && (
+        <RouteSearch key={routeSearchKeyRef.current} isOpen={showRouteSearch} onClose={() => setShowRouteSearch(false)} />
+      )}
 
       {/* HUD Editor Overlay */}
       <AnimatePresence>
@@ -915,6 +982,8 @@ export function DrivePage() {
           </>
         )}
       </AnimatePresence>
+
+      <BottomNav />
     </div>
   );
 }
