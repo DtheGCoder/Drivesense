@@ -36,7 +36,7 @@ interface StoredUser {
 
 interface StoredProfile {
   userId: string;
-  profilePicture?: string; // filename (not base64)
+  profilePicture?: string | undefined;
   cars: unknown[];
   selectedCarId?: string;
   fuelPriceBenzin: number;
@@ -362,7 +362,7 @@ async function start() {
     if (profiles[userId]?.profilePicture) {
       const filepath = join(UPLOADS_DIR, profiles[userId].profilePicture!);
       try { unlinkSync(filepath); } catch { /* ignore */ }
-      profiles[userId].profilePicture = undefined;
+      delete profiles[userId].profilePicture;
       saveProfiles(profiles);
     }
 
