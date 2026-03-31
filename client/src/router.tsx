@@ -6,7 +6,7 @@ import { TripsPage } from '@/pages/TripsPage';
 import { TripDetailPage } from '@/pages/TripDetailPage';
 import { LeaderboardPage } from '@/pages/LeaderboardPage';
 import { ProfilePage } from '@/pages/ProfilePage';
-import { LoginPage } from '@/pages/AuthPages';
+import { LoginPage, RegisterPage } from '@/pages/AuthPages';
 import { AdminPage } from '@/pages/AdminPage';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -29,6 +29,7 @@ function RedirectIfAuth({ children }: { children: React.ReactNode }) {
 export const router = createBrowserRouter([
   // Auth routes (redirect if already logged in)
   { path: '/login', element: <RedirectIfAuth><LoginPage /></RedirectIfAuth> },
+  { path: '/register', element: <RedirectIfAuth><RegisterPage /></RedirectIfAuth> },
 
   // Protected app routes
   { path: '/map', element: <RequireAuth><MapHomePage /></RequireAuth> },

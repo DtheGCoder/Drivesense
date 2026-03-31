@@ -156,6 +156,14 @@ export function LoginPage() {
           </div>
         </GlassCard>
 
+        {/* Register link */}
+        <div className="text-center text-sm">
+          <span className="text-ds-text-muted">Noch kein Konto? </span>
+          <Link to="/register" className="text-ds-primary font-semibold hover:underline">
+            Registrieren
+          </Link>
+        </div>
+
 
       </motion.div>
     </div>
