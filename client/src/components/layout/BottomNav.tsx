@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { useTripStore } from '@/stores/tripStore';
 
@@ -60,7 +61,7 @@ export function BottomNav() {
   const tripStatus = useTripStore((s) => s.status);
   const isRecording = tripStatus === 'recording';
 
-  return (
+  return createPortal(
     <nav className="fixed bottom-0 left-0 right-0 z-50 glass border-t border-ds-border-subtle pointer-events-auto"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
@@ -134,6 +135,7 @@ export function BottomNav() {
           );
         })}
       </div>
-    </nav>
+    </nav>,
+    document.body,
   );
 }
