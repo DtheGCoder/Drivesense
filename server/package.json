@@ -8,8 +8,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:simple": "tsx watch src/simple-api.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:simple": "node dist/simple-api.js",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

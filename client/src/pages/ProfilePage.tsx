@@ -11,6 +11,8 @@ import { useProfileStore, type CarProfile } from '@/stores/profileStore';
 import { useTripHistoryStore } from '@/stores/tripHistoryStore';
 import { IconTrophy, IconTarget, IconStar, IconAward, IconTrendUp, IconBell, IconRuler, IconPalette, IconLock, IconDownload, IconHelpCircle, IconUser, IconEdit, IconChevronRight, IconShield, IconUsers, IconPlus, IconTrash } from '@/components/ui/Icons';
 
+import { apiUploadPicture } from '@/lib/api';
+
 // ─── Demo Data ───────────────────────────────────────────────────────────────
 
 const demoProfile = {
@@ -113,25 +115,30 @@ export function ProfilePage() {
   const handlePictureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      alert('Bild darf max. 2 MB groß sein');
+    if (file.size > 50 * 1024 * 1024) {
+      alert('Bild darf max. 50 MB groß sein');
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        // Resize to 256px max before storing
+        // Resize to 512px max before storing/uploading
         const img = new Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const maxSize = 256;
+          const maxSize = 512;
           const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
           canvas.width = img.width * scale;
           canvas.height = img.height * scale;
           const ctx = canvas.getContext('2d');
           if (ctx) {
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            updateProfilePicture(canvas.toDataURL('image/jpeg', 0.8));
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            updateProfilePicture(dataUrl);
+            // Upload to server
+            canvas.toBlob((blob) => {
+              if (blob) apiUploadPicture(blob).then(({ url }) => updateProfilePicture(url)).catch(() => {});
+            }, 'image/jpeg', 0.8);
           }
         };
         img.src = reader.result;

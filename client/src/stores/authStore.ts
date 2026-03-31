@@ -1,4 +1,9 @@
 import { create } from 'zustand';
+import {
+  apiLogin, apiMe, apiListUsers, apiCreateUser, apiDeleteUser,
+  clearToken, getToken,
+  type ApiUser,
+} from '@/lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -9,6 +14,14 @@ export interface User {
   displayName?: string | null;
   role: 'admin' | 'user';
   isVerified?: boolean;
+}
+
+export interface StoredUser {
+  id: string;
+  username: string;
+  email: string;
+  role: 'admin' | 'user';
+  createdAt: number;
 }
 
 interface AuthSession {
@@ -26,7 +39,7 @@ interface AuthState {
   initFromStorage: () => void;
 }
 
-// ─── Persistence (30 days) ───────────────────────────────────────────────────
+// ─── Persistence (30 days — local cache of current session) ──────────────────
 
 const AUTH_STORAGE_KEY = 'drivesense_session';
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -56,94 +69,50 @@ function loadSession(): User | null {
 
 function clearSession() {
   localStorage.removeItem(AUTH_STORAGE_KEY);
+  clearToken();
 }
 
-// ─── Registered Users (client-side for demo/offline mode) ────────────────────
+// ─── API-backed Auth Functions ───────────────────────────────────────────────
 
-const USERS_STORAGE_KEY = 'drivesense_users';
-
-export interface StoredUser {
-  id: string;
-  username: string;
-  email: string;
-  passwordHash: string; // Simple hash — NOT for production
-  role: 'admin' | 'user';
-  createdAt: number;
+function apiUserToUser(u: ApiUser): User {
+  return { id: u.id, username: u.username, email: u.email, role: u.role };
 }
 
-// Default admin account
-const DEFAULT_ADMIN: StoredUser = {
-  id: 'admin-dtheg',
-  username: 'DtheG',
-  email: 'admin@drivesense.de',
-  passwordHash: simpleHash('Admin0815A'),
-  role: 'admin',
-  createdAt: Date.now(),
-};
-
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return 'h_' + Math.abs(hash).toString(36);
-}
-
-export function getRegisteredUsers(): StoredUser[] {
+export async function authenticateUser(email: string, password: string): Promise<User | { error: string }> {
   try {
-    const raw = localStorage.getItem(USERS_STORAGE_KEY);
-    if (!raw) {
-      // Initialize with default admin
-      const initial = [DEFAULT_ADMIN];
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(initial));
-      return initial;
-    }
-    return JSON.parse(raw);
+    const { user } = await apiLogin(email, password);
+    return apiUserToUser(user);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Login fehlgeschlagen' };
+  }
+}
+
+export async function getRegisteredUsers(): Promise<StoredUser[]> {
+  try {
+    const { users } = await apiListUsers();
+    return users.map((u) => ({ id: u.id, username: u.username, email: u.email, role: u.role, createdAt: u.createdAt ?? 0 }));
   } catch {
-    return [DEFAULT_ADMIN];
+    return [];
   }
 }
 
-export function registerUser(username: string, email: string, password: string, role: 'admin' | 'user' = 'user'): StoredUser | { error: string } {
-  const users = getRegisteredUsers();
-  if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
-    return { error: 'E-Mail bereits registriert' };
+export async function registerUser(username: string, email: string, password: string, role: 'admin' | 'user' = 'user'): Promise<StoredUser | { error: string }> {
+  try {
+    const { user } = await apiCreateUser(username, email, password, role);
+    return { id: user.id, username: user.username, email: user.email, role: user.role, createdAt: user.createdAt ?? Date.now() };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Erstellen fehlgeschlagen' };
   }
-  if (users.find((u) => u.username.toLowerCase() === username.toLowerCase())) {
-    return { error: 'Benutzername bereits vergeben' };
+}
+
+export async function deleteUser(id: string): Promise<boolean> {
+  try {
+    await apiDeleteUser(id);
+    return true;
+  } catch {
+    return false;
   }
-  const newUser: StoredUser = {
-    id: crypto.randomUUID(),
-    username,
-    email,
-    passwordHash: simpleHash(password),
-    role,
-    createdAt: Date.now(),
-  };
-  users.push(newUser);
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-  return newUser;
 }
-
-export function authenticateUser(email: string, password: string): User | { error: string } {
-  const users = getRegisteredUsers();
-  const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-  if (!user) return { error: 'Benutzer nicht gefunden' };
-  if (user.passwordHash !== simpleHash(password)) return { error: 'Falsches Passwort' };
-  return { id: user.id, username: user.username, email: user.email, role: user.role };
-}
-
-export function deleteUser(id: string): boolean {
-  const users = getRegisteredUsers();
-  const filtered = users.filter((u) => u.id !== id);
-  if (filtered.length === users.length) return false;
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(filtered));
-  return true;
-}
-
-export { simpleHash };
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 
@@ -163,6 +132,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   initFromStorage: () => {
     const user = loadSession();
+    // If we have a token, verify it's still valid in the background
+    if (user && getToken()) {
+      apiMe()
+        .then(({ user: u }) => {
+          const freshUser = apiUserToUser(u);
+          saveSession(freshUser);
+          set({ user: freshUser, isAuthenticated: true, isLoading: false });
+        })
+        .catch(() => {
+          // Token expired — keep cached session for now (offline support)
+        });
+    }
     set({ user, isAuthenticated: !!user, isLoading: false });
   },
 }));

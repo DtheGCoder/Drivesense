@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { apiGetProfile, apiUpdateProfile, apiDeletePicture, getToken } from '@/lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -111,13 +112,46 @@ function estimateConsumption(car: CarProfile, avgSpeedKmh: number): number {
   return base;
 }
 
+// Sync profile to server (fire-and-forget)
+function syncToServer(profile: UserProfile) {
+  if (!getToken()) return;
+  const { profilePicture: _, ...data } = profile;
+  void _;
+  apiUpdateProfile(data as unknown as Parameters<typeof apiUpdateProfile>[0]).catch(() => { /* offline */ });
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 export const useProfileStore = create<ProfileState>((set, get) => ({
   profile: null,
 
   loadProfile: (userId: string) => {
-    set({ profile: loadFromStorage(userId) });
+    // Load from localStorage immediately
+    const local = loadFromStorage(userId);
+    set({ profile: local });
+
+    // Then try to fetch from server and merge
+    if (getToken()) {
+      apiGetProfile()
+        .then(({ profile: remote }) => {
+          if (remote) {
+            const merged: UserProfile = {
+              ...local,
+              ...remote,
+              userId,
+              cars: (remote.cars as UserProfile['cars']).length > 0 ? remote.cars as UserProfile['cars'] : local.cars,
+              settings: { ...local.settings, ...(remote.settings as unknown as UserProfile['settings']) },
+              profilePicture: remote.profilePicture ?? local.profilePicture,
+            };
+            set({ profile: merged });
+            saveToStorage(merged);
+          } else {
+            // No server profile yet — push local data up
+            syncToServer(local);
+          }
+        })
+        .catch(() => { /* offline — use local */ });
+    }
   },
 
   updateProfilePicture: (dataUrl: string) => {
@@ -136,6 +170,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const updated = { ...rest, profilePicture: undefined } as UserProfile;
     set({ profile: updated });
     saveToStorage(updated);
+    apiDeletePicture().catch(() => {});
   },
 
   addCar: (car: CarProfile) => {
@@ -148,6 +183,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     };
     set({ profile: updated });
     saveToStorage(updated);
+    syncToServer(updated);
   },
 
   updateCar: (carId: string, updates: Partial<CarProfile>) => {
@@ -159,6 +195,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     };
     set({ profile: updated });
     saveToStorage(updated);
+    syncToServer(updated);
   },
 
   removeCar: (carId: string) => {
@@ -171,6 +208,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     };
     set({ profile: updated });
     saveToStorage(updated);
+    syncToServer(updated);
   },
 
   selectCar: (carId: string) => {
@@ -179,6 +217,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const updated = { ...profile, selectedCarId: carId };
     set({ profile: updated });
     saveToStorage(updated);
+    syncToServer(updated);
   },
 
   updateFuelPrices: (prices) => {
@@ -187,6 +226,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const updated = { ...profile, ...prices };
     set({ profile: updated });
     saveToStorage(updated);
+    syncToServer(updated);
   },
 
   updateSettings: (partial) => {
@@ -195,6 +235,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const updated = { ...profile, settings: { ...profile.settings, ...partial } };
     set({ profile: updated });
     saveToStorage(updated);
+    syncToServer(updated);
   },
 
   getSelectedCar: () => {

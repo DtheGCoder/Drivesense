@@ -3,9 +3,9 @@ import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { Button } from '@/components/ui/Button';
-import { useAuthStore, authenticateUser, registerUser } from '@/stores/authStore';
+import { useAuthStore, authenticateUser } from '@/stores/authStore';
 import { useMap } from '@/components/map/MapProvider';
-import { LogoDriveSense, IconMail, IconLock, IconUser, IconCheck } from '@/components/ui/Icons';
+import { LogoDriveSense, IconMail, IconLock } from '@/components/ui/Icons';
 
 // ─── Input Component ─────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ export function LoginPage() {
       return;
     }
 
-    const result = authenticateUser(email, password);
+    const result = await authenticateUser(email, password);
     if ('error' in result) {
       setError(result.error);
       setLoading(false);
@@ -156,169 +156,7 @@ export function LoginPage() {
           </div>
         </GlassCard>
 
-        {/* Register link */}
-        <div className="text-center text-sm">
-          <span className="text-ds-text-muted">Noch kein Konto? </span>
-          <Link to="/register" className="text-ds-primary font-semibold hover:underline">
-            Registrieren
-          </Link>
-        </div>
 
-
-      </motion.div>
-    </div>
-  );
-}
-
-// ─── Register Page ───────────────────────────────────────────────────────────
-
-export function RegisterPage() {
-  const navigate = useNavigate();
-  const { setUser } = useAuthStore();
-  const { setInteractive } = useMap();
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Disable map interaction on auth pages
-  useEffect(() => {
-    setInteractive(false);
-    return () => { setInteractive(true); };
-  }, [setInteractive]);
-
-  const validate = () => {
-    const errs: Record<string, string> = {};
-    if (!username || username.length < 3) errs.username = 'Mind. 3 Zeichen';
-    if (!email || !email.includes('@')) errs.email = 'Gültige E-Mail erforderlich';
-    if (!password || password.length < 8) errs.password = 'Mind. 8 Zeichen';
-    if (password !== confirmPassword) errs.confirmPassword = 'Passwörter stimmen nicht überein';
-    return errs;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length > 0) {
-      setErrors(errs);
-      return;
-    }
-    setErrors({});
-    setLoading(true);
-
-    await new Promise((r) => setTimeout(r, 300));
-
-    const result = registerUser(username, email, password);
-    if ('error' in result) {
-      setErrors({ email: result.error });
-      setLoading(false);
-      return;
-    }
-
-    setUser({
-      id: result.id,
-      username: result.username,
-      email: result.email,
-      role: result.role,
-    });
-    navigate('/map');
-    setLoading(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-10 flex flex-col items-center justify-center px-6 py-12 bg-ds-bg/60 backdrop-blur-sm">
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-ds-primary/5 blur-[120px] pointer-events-none" />
-
-      <motion.div
-        className="w-full max-w-sm space-y-6 relative z-10"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        {/* Header */}
-        <div className="text-center">
-          <motion.div
-            className="w-16 h-16 rounded-2xl bg-gradient-to-br from-ds-primary to-ds-primary-dim flex items-center justify-center mx-auto mb-3"
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-          >
-            <LogoDriveSense size={36} />
-          </motion.div>
-          <h1 className="text-2xl font-bold">Konto erstellen</h1>
-          <p className="text-sm text-ds-text-muted mt-1">Starte dein Fahrabenteuer</p>
-        </div>
-
-        {/* Form */}
-        <GlassCard className="p-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Benutzername"
-              type="text"
-              placeholder="dein_name"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              error={errors.username}
-              autoComplete="username"
-              icon={
-                <IconUser size={16} />
-              }
-            />
-
-            <Input
-              label="E-Mail"
-              type="email"
-              placeholder="deine@email.de"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              error={errors.email}
-              autoComplete="email"
-              icon={
-                <IconMail size={16} />
-              }
-            />
-
-            <Input
-              label="Passwort"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              error={errors.password}
-              autoComplete="new-password"
-              icon={
-                <IconLock size={16} />
-              }
-            />
-
-            <Input
-              label="Passwort bestätigen"
-              type="password"
-              placeholder="••••••••"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              error={errors.confirmPassword}
-              autoComplete="new-password"
-              icon={
-                <IconCheck size={16} />
-              }
-            />
-
-            <Button type="submit" fullWidth size="lg" loading={loading}>
-              Registrieren
-            </Button>
-          </form>
-        </GlassCard>
-
-        {/* Login link */}
-        <div className="text-center text-sm">
-          <span className="text-ds-text-muted">Schon registriert? </span>
-          <Link to="/login" className="text-ds-primary font-semibold hover:underline">
-            Anmelden
-          </Link>
-        </div>
       </motion.div>
     </div>
   );

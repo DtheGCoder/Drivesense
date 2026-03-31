@@ -38,7 +38,7 @@ function CreateUserSheet({ isOpen, onClose, onCreated }: { isOpen: boolean; onCl
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [success, setSuccess] = useState(false);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const errs: Record<string, string> = {};
     if (!username || username.length < 2) errs.username = 'Mind. 2 Zeichen';
     if (!email || !email.includes('@')) errs.email = 'Gültige E-Mail';
@@ -46,7 +46,7 @@ function CreateUserSheet({ isOpen, onClose, onCreated }: { isOpen: boolean; onCl
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     setErrors({});
 
-    const result = registerUser(username, email, password, role);
+    const result = await registerUser(username, email, password, role);
     if ('error' in result) {
       setErrors({ email: result.error });
       return;
@@ -256,7 +256,10 @@ export function AdminPage() {
   const [users, setUsers] = useState<StoredUser[]>([]);
   const [showCreate, setShowCreate] = useState(false);
 
-  const loadUsers = () => setUsers(getRegisteredUsers());
+  const loadUsers = async () => {
+    const users = await getRegisteredUsers();
+    setUsers(users);
+  };
 
   useEffect(() => {
     // Only admins allowed
@@ -267,9 +270,9 @@ export function AdminPage() {
     loadUsers();
   }, [currentUser, navigate]);
 
-  const handleDelete = (id: string) => {
-    deleteUser(id);
-    loadUsers();
+  const handleDelete = async (id: string) => {
+    await deleteUser(id);
+    await loadUsers();
   };
 
   const adminCount = users.filter((u) => u.role === 'admin').length;
