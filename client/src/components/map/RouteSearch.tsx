@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, type KeyboardEvent } from 're
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMap, type RouteStep } from '@/components/map/MapProvider';
 import { useGeolocation } from '@/hooks/useGeolocation';
+import { useProfileStore } from '@/stores/profileStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -181,6 +182,7 @@ interface RouteSearchProps {
 export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   const { flyTo, drawRoute, clearRoute, fetchRoute, map } = useMap();
   const { position: gpsPosition } = useGeolocation({ autoStart: true });
+  const calculateFuelCost = useProfileStore((s) => s.calculateFuelCost);
 
   // View state
   const [view, setView] = useState<'search' | 'overview' | 'navigation'>('search');
@@ -477,6 +479,20 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                 <div className="text-[10px] text-white/40 uppercase tracking-wider">Fahrzeit</div>
               </div>
               <div className="w-px h-8 bg-white/10" />
+              {(() => {
+                const avgSpeedEstimate = routeInfo.duration > 0 ? (routeInfo.distance / routeInfo.duration) * 3.6 : 50;
+                const fuel = calculateFuelCost(remainingDistance, avgSpeedEstimate);
+                if (fuel) return (
+                  <>
+                    <div className="text-center">
+                      <div className="text-xl font-bold text-amber-400">{fuel.cost.toFixed(2)}€</div>
+                      <div className="text-[10px] text-white/40 uppercase tracking-wider">Kosten</div>
+                    </div>
+                    <div className="w-px h-8 bg-white/10" />
+                  </>
+                );
+                return null;
+              })()}
               <div className="text-center">
                 <div className="text-xl font-bold text-ds-success">{eta}</div>
                 <div className="text-[10px] text-white/40 uppercase tracking-wider">Ankunft</div>
@@ -537,7 +553,17 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                 <span className="text-lg font-bold text-ds-primary">{formatDistance(routeInfo.distance)}</span>
                 <span className="text-xs text-white/40 ml-2">{formatDuration(routeInfo.duration)}</span>
               </div>
-              <div className="text-sm text-white/50">Ankunft ~{eta}</div>
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const avgSpeedEstimate = routeInfo.duration > 0 ? (routeInfo.distance / routeInfo.duration) * 3.6 : 50;
+                  const fuel = calculateFuelCost(routeInfo.distance, avgSpeedEstimate);
+                  if (!fuel) return null;
+                  return (
+                    <span className="text-sm font-bold text-amber-400">~{fuel.cost.toFixed(2)} €</span>
+                  );
+                })()}
+                <div className="text-sm text-white/50">~{eta}</div>
+              </div>
             </div>
 
             <div className="flex gap-1.5 px-4 py-2.5 overflow-x-auto no-scrollbar border-t border-white/5">

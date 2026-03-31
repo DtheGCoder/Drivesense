@@ -43,6 +43,8 @@ interface MapContextValue {
   flyTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => void;
   drawRoute: (coordinates: [number, number][]) => void;
   clearRoute: () => void;
+  drawBreadcrumb: (coordinates: [number, number][]) => void;
+  clearBreadcrumb: () => void;
   fetchRoute: (from: [number, number], to: [number, number]) => Promise<{ coordinates: [number, number][]; duration: number; distance: number; steps: RouteStep[] } | null>;
   addUserRoute: (userId: string, coordinates: [number, number][], color: string) => void;
   removeUserRoute: (userId: string) => void;
@@ -64,6 +66,9 @@ const DEFAULT_CENTER: [number, number] = [8.6821, 50.1109]; // Frankfurt
 const ROUTE_SOURCE_ID = 'route-source';
 const ROUTE_LAYER_ID = 'route-layer';
 const ROUTE_OUTLINE_LAYER_ID = 'route-outline-layer';
+const BREADCRUMB_SOURCE_ID = 'breadcrumb-source';
+const BREADCRUMB_LAYER_ID = 'breadcrumb-layer';
+const BREADCRUMB_OUTLINE_LAYER_ID = 'breadcrumb-outline-layer';
 
 export function MapProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(!!singletonMap?.isStyleLoaded());
@@ -169,6 +174,39 @@ export function MapProvider({ children }: { children: ReactNode }) {
         },
       });
 
+      // Breadcrumb trail source (recording, separate from planned route)
+      map.addSource(BREADCRUMB_SOURCE_ID, {
+        type: 'geojson',
+        data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } },
+      });
+
+      // Breadcrumb glow
+      map.addLayer({
+        id: BREADCRUMB_OUTLINE_LAYER_ID,
+        type: 'line',
+        source: BREADCRUMB_SOURCE_ID,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#a855f7',
+          'line-width': 10,
+          'line-opacity': 0.15,
+          'line-blur': 6,
+        },
+      });
+
+      // Breadcrumb line
+      map.addLayer({
+        id: BREADCRUMB_LAYER_ID,
+        type: 'line',
+        source: BREADCRUMB_SOURCE_ID,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#a855f7',
+          'line-width': 4,
+          'line-opacity': 0.9,
+        },
+      });
+
       // Geolocate control
       map.addControl(
         new mapboxgl.GeolocateControl({
@@ -209,6 +247,20 @@ export function MapProvider({ children }: { children: ReactNode }) {
   const clearRoute = useCallback(() => {
     drawRoute([]);
   }, [drawRoute]);
+
+  const drawBreadcrumb = useCallback((coordinates: [number, number][]) => {
+    const source = singletonMap?.getSource(BREADCRUMB_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+    if (!source) return;
+    source.setData({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'LineString', coordinates },
+    });
+  }, []);
+
+  const clearBreadcrumb = useCallback(() => {
+    drawBreadcrumb([]);
+  }, [drawBreadcrumb]);
 
   const fetchRoute = useCallback(async (from: [number, number], to: [number, number]): Promise<{ coordinates: [number, number][]; duration: number; distance: number; steps: RouteStep[] } | null> => {
     if (!MAPBOX_TOKEN) return null;
@@ -324,7 +376,7 @@ export function MapProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <MapContext.Provider value={{ map: singletonMap, loaded, hasToken, flyTo, drawRoute, clearRoute, fetchRoute, addUserRoute, removeUserRoute, clearAllUserRoutes, setInteractive }}>
+    <MapContext.Provider value={{ map: singletonMap, loaded, hasToken, flyTo, drawRoute, clearRoute, drawBreadcrumb, clearBreadcrumb, fetchRoute, addUserRoute, removeUserRoute, clearAllUserRoutes, setInteractive }}>
       {children}
     </MapContext.Provider>
   );
