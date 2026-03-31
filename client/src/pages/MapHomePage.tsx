@@ -3,11 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import mapboxgl from 'mapbox-gl';
 import { Layout } from '@/components/layout/Layout';
 import { useMap } from '@/components/map/MapProvider';
-import { useLiveStore, type LiveUser, USER_COLORS } from '@/stores/liveStore';
-import { useAuthStore } from '@/stores/authStore';
-import { useProfileStore } from '@/stores/profileStore';
-import { useTripHistoryStore } from '@/stores/tripHistoryStore';
+import { useLiveStore, type LiveUser } from '@/stores/liveStore';
 import { useGeolocation, getPermissionHint } from '@/hooks/useGeolocation';
+import { useLiveTracking } from '@/hooks/useLiveTracking';
 import { ScoreRing, ModeBadge } from '@/components/ui/DataDisplays';
 import { IconGauge, IconClock, IconRoute, IconTarget, IconUsers } from '@/components/ui/Icons';
 import { RouteSearch } from '@/components/map/RouteSearch';
@@ -175,19 +173,16 @@ function UserCard({ user, onClose, onFocus }: { user: LiveUser; onClose: () => v
 // ─── MapHomePage ─────────────────────────────────────────────────────────────
 
 export function MapHomePage() {
-  const { map, loaded, flyTo, addUserRoute, clearAllUserRoutes, fetchRoute, setInteractive } = useMap();
+  const { map, loaded, flyTo, addUserRoute, clearAllUserRoutes, setInteractive } = useMap();
   const users = useLiveStore((s) => s.users);
   const selectedUserId = useLiveStore((s) => s.selectedUserId);
   const selectUser = useLiveStore((s) => s.selectUser);
-  const updateUser = useLiveStore((s) => s.updateUser);
-  const addUser = useLiveStore((s) => s.addUser);
-  const removeUser = useLiveStore((s) => s.removeUser);
-  const authUser = useAuthStore((s) => s.user);
-  const profile = useProfileStore((s) => s.profile);
-  const getUserStats = useTripHistoryStore((s) => s.getUserStats);
   const { position: selfPosition, status: gpsStatus, startTracking } = useGeolocation({ autoStart: true });
   const [showSearch, setShowSearch] = useState(false);
   const [showDriverList, setShowDriverList] = useState(false);
+
+  // Live tracking — connects WebSocket, sends position, receives all users
+  useLiveTracking();
 
   // Ensure map is interactive on this page
   useEffect(() => {
@@ -195,34 +190,21 @@ export function MapHomePage() {
   }, [setInteractive]);
 
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
-  const routesFetched = useRef<Set<string>>(new Set());
 
-  // Fetch and draw routes for driving users
+  // Draw routes for users that have route data
   useEffect(() => {
     if (!loaded) return;
 
-    const drivingUsers = users.filter((u) => u.status === 'driving' && u.destination && !routesFetched.current.has(u.id));
-    drivingUsers.forEach(async (user) => {
-      if (!user.destination) return;
-      routesFetched.current.add(user.id);
-      // Use destination coordinates from user route if available
-      const destCoord: [number, number] | undefined = user.route?.[user.route.length - 1];
-      if (!destCoord) return;
-      const result = await fetchRoute(user.position, destCoord);
-      if (result) {
-        addUserRoute(user.id, result.coordinates, user.color);
-        updateUser(user.id, {
-          route: result.coordinates,
-          eta: result.duration,
-          distanceRemaining: result.distance,
-        });
+    for (const user of users) {
+      if (user.route && user.route.length > 1 && !user.isSelf) {
+        addUserRoute(user.id, user.route, user.color);
       }
-    });
+    }
 
     return () => {
       clearAllUserRoutes();
     };
-  }, [loaded, users, fetchRoute, addUserRoute, clearAllUserRoutes, updateUser]);
+  }, [loaded, users, addUserRoute, clearAllUserRoutes]);
 
   // Create / update markers
   useEffect(() => {
@@ -264,53 +246,15 @@ export function MapHomePage() {
     };
   }, []);
 
-  // Register self as live user
-  useEffect(() => {
-    if (!authUser) return;
-
-    const userId = authUser.id;
-    const username = authUser.displayName ?? authUser.username;
-    const initials = username.slice(0, 2).toUpperCase();
-    const stats = getUserStats(userId);
-
-    // Add self to liveStore
-    const selfUser: LiveUser = {
-      id: userId,
-      username,
-      initials,
-      color: USER_COLORS[0]!,
-      position: [8.6700, 50.1100], // default Frankfurt, updated by GPS
-      heading: 0,
-      status: 'idle',
-      speed: 0,
-      score: stats.avgScore,
-      profilePicture: profile?.profilePicture,
-      isSelf: true,
-      lastUpdate: Date.now(),
-    };
-    addUser(selfUser);
-
-    return () => {
-      removeUser(userId);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser?.id]);
-
-  // Update self-user position from shared GPS hook
+  // Fly to self once on first GPS position
   const hasFlyToSelf = useRef(false);
   useEffect(() => {
-    if (!authUser || !selfPosition) return;
-    const center: [number, number] = [selfPosition.lng, selfPosition.lat];
-    updateUser(authUser.id, {
-      position: center,
-      heading: selfPosition.heading ?? 0,
-      speed: (selfPosition.speed ?? 0) * 3.6,
-    });
+    if (!selfPosition) return;
     if (!hasFlyToSelf.current) {
       hasFlyToSelf.current = true;
-      flyTo({ center, zoom: 14, pitch: 45, bearing: -15, duration: 2000 });
+      flyTo({ center: [selfPosition.lng, selfPosition.lat], zoom: 14, pitch: 45, bearing: -15, duration: 2000 });
     }
-  }, [authUser, selfPosition, updateUser, flyTo]);
+  }, [selfPosition, flyTo]);
 
   // Handle user focus
   const handleFocusUser = useCallback((userId: string) => {

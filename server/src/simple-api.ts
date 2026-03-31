@@ -9,6 +9,7 @@
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import websocket from '@fastify/websocket';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -96,6 +97,8 @@ async function start() {
     origin: true,
     credentials: true,
   });
+
+  await app.register(websocket);
 
   // Health check
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -395,6 +398,123 @@ async function start() {
       .header('Content-Type', mimeTypes[ext ?? ''] ?? 'application/octet-stream')
       .header('Cache-Control', 'public, max-age=86400')
       .send(data);
+  });
+
+  // ─── WebSocket: Live User Tracking ─────────────────────────────────────
+
+  interface WsClient {
+    ws: unknown;
+    userId: string;
+    username: string;
+    profilePicture?: string | undefined;
+    position?: [number, number];
+    heading?: number;
+    speed?: number;
+    status?: string;
+    route?: [number, number][] | undefined;
+    destination?: string | undefined;
+    lastUpdate: number;
+  }
+
+  const wsClients = new Map<string, WsClient>();
+
+  function broadcastUsers() {
+    const now = Date.now();
+    const userList = Array.from(wsClients.values())
+      .filter((c) => now - c.lastUpdate < 60_000) // only active in last 60s
+      .map((c) => ({
+        id: c.userId,
+        username: c.username,
+        profilePicture: c.profilePicture,
+        position: c.position,
+        heading: c.heading ?? 0,
+        speed: c.speed ?? 0,
+        status: c.status ?? 'idle',
+        route: c.route,
+        destination: c.destination,
+        lastUpdate: c.lastUpdate,
+      }));
+    const msg = JSON.stringify({ type: 'users', users: userList });
+    for (const client of wsClients.values()) {
+      const ws = client.ws as { readyState: number; send: (data: string) => void };
+      if (ws.readyState === 1) {
+        ws.send(msg);
+      }
+    }
+  }
+
+  // Periodic broadcast every 3 seconds
+  const broadcastInterval = setInterval(broadcastUsers, 3000);
+  app.addHook('onClose', () => clearInterval(broadcastInterval));
+
+  app.get('/api/v1/ws', { websocket: true }, (socket, request) => {
+    // Auth via query param: ?token=...
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const token = url.searchParams.get('token');
+    const userId = extractUserId(token ? `Bearer ${token}` : undefined);
+
+    if (!userId) {
+      socket.send(JSON.stringify({ type: 'error', message: 'Nicht authentifiziert' }));
+      socket.close();
+      return;
+    }
+
+    const users = loadUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) {
+      socket.send(JSON.stringify({ type: 'error', message: 'Benutzer nicht gefunden' }));
+      socket.close();
+      return;
+    }
+
+    // Build profile picture URL
+    const profiles = loadProfiles();
+    const profile = profiles[userId];
+    let profilePicture: string | undefined;
+    if (profile?.profilePicture) {
+      const host = request.headers.host ?? 'localhost:788';
+      const protocol = request.headers['x-forwarded-proto'] ?? 'http';
+      profilePicture = `${protocol}://${host}/api/v1/uploads/${profile.profilePicture}`;
+    }
+
+    const client: WsClient = {
+      ws: socket,
+      userId,
+      username: user.username,
+      profilePicture,
+      lastUpdate: Date.now(),
+    };
+    wsClients.set(userId, client);
+
+    // Send current users immediately
+    broadcastUsers();
+
+    socket.on('message', (raw: unknown) => {
+      try {
+        const data = JSON.parse(String(raw));
+        if (data.type === 'position') {
+          const c = wsClients.get(userId);
+          if (c) {
+            if (Array.isArray(data.position) && data.position.length === 2) c.position = data.position;
+            if (typeof data.heading === 'number') c.heading = data.heading;
+            if (typeof data.speed === 'number') c.speed = data.speed;
+            if (typeof data.status === 'string') c.status = data.status;
+            if (Array.isArray(data.route)) c.route = data.route;
+            else if (data.route === null) c.route = undefined;
+            if (typeof data.destination === 'string') c.destination = data.destination;
+            else if (data.destination === null) c.destination = undefined;
+            c.lastUpdate = Date.now();
+          }
+          // Broadcast immediately on position update
+          broadcastUsers();
+        }
+      } catch { /* ignore malformed messages */ }
+    });
+
+    socket.on('close', () => {
+      wsClients.delete(userId);
+      broadcastUsers();
+    });
   });
 
   // ─── Token Helpers ───────────────────────────────────────────────────────

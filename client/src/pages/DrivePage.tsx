@@ -21,6 +21,7 @@ import { useHudStore } from '@/stores/hudStore';
 import { RouteSearch } from '@/components/map/RouteSearch';
 import { BottomNav } from '@/components/layout/BottomNav';
 import { useRadarStore } from '@/stores/radarStore';
+import { useLiveTracking } from '@/hooks/useLiveTracking';
 
 // ─── Mode Selector Modal ─────────────────────────────────────────────────────
 
@@ -201,6 +202,11 @@ export function DrivePage() {
 
   const isRecording = tripStatus === 'recording';
   const isIdle = tripStatus === 'idle';
+
+  // Live tracking — broadcasts position + route to other users
+  useLiveTracking({
+    status: isRecording ? 'driving' : 'idle',
+  });
 
   // Format elapsed time
   const formatTime = (ms: number) => {
