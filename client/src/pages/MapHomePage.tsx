@@ -209,6 +209,7 @@ export function MapHomePage() {
   // Create / update markers
   useEffect(() => {
     if (!map || !loaded) return;
+    console.log('[MapHome] markers effect — users:', users.length, users.map(u => `${u.username}(${u.isSelf ? 'self' : 'other'}) @${u.position}`));
 
     const currentIds = new Set(users.map((u) => u.id));
 

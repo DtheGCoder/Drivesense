@@ -64,10 +64,18 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
 
   // Local self-user fallback — always show yourself even without WebSocket
   useEffect(() => {
-    if (!authUser || !position) return;
+    if (!authUser || !position) {
+      console.log('[LiveTracking] fallback skip — authUser:', !!authUser, 'position:', !!position);
+      return;
+    }
 
     // If WebSocket is connected and feeding data, server broadcasts include self — skip local fallback
-    if (wsConnectedRef.current) return;
+    if (wsConnectedRef.current) {
+      console.log('[LiveTracking] WS connected, server handles user list');
+      return;
+    }
+
+    console.log('[LiveTracking] local fallback — adding self user at', [position.lng, position.lat]);
 
     const selfUser: LiveUser = {
       id: authUser.id,
@@ -117,12 +125,18 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
 
     function connect() {
       if (!alive) return;
+      console.log('[LiveTracking] WS connecting to', getWsUrl().replace(/token=.*/, 'token=***'));
       const ws = new WebSocket(getWsUrl());
       wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('[LiveTracking] WS opened');
+      };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('[LiveTracking] WS message:', data.type, 'users:', data.users?.length);
           if (data.type === 'users' && Array.isArray(data.users)) {
             wsConnectedRef.current = true;
             const serverUsers = data.users as ServerUser[];
@@ -150,7 +164,8 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
         } catch { /* ignore */ }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        console.log('[LiveTracking] WS closed:', ev.code, ev.reason);
         wsRef.current = null;
         wsConnectedRef.current = false;
         if (alive) {
@@ -158,7 +173,8 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (ev) => {
+        console.error('[LiveTracking] WS error:', ev);
         ws.close();
       };
     }
