@@ -342,13 +342,18 @@ export function MapHomePage() {
       {/* Search button (when search is closed) */}
       {!showSearch && (
         <button
-          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-4 py-3 flex items-center gap-3 text-left pointer-events-auto"
+          className="absolute top-4 left-4 right-4 z-20 mt-safe-top glass rounded-2xl px-5 py-5 flex items-center gap-4 text-left pointer-events-auto"
           onClick={() => setShowSearch(true)}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <span className="text-sm text-ds-text-muted">Wohin möchtest du fahren?</span>
+          <div className="w-10 h-10 rounded-full bg-ds-primary/10 flex items-center justify-center flex-shrink-0">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-ds-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <span className="text-base text-white/80 font-medium">Wohin möchtest du fahren?</span>
+            <p className="text-xs text-ds-text-muted mt-0.5">Suche nach Ort, Adresse oder POI</p>
+          </div>
         </button>
       )}
 
@@ -387,13 +392,17 @@ export function MapHomePage() {
       {/* Driver list toggle button (bottom) */}
       {!showSearch && (
         <button
-          className="absolute bottom-32 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto"
+          className="absolute bottom-32 right-4 z-20 glass rounded-full w-12 h-12 flex items-center justify-center pointer-events-auto overflow-hidden"
           onClick={() => setShowDriverList(!showDriverList)}
         >
-          <div className="relative">
-            <IconUsers size={20} />
+          <div className="relative w-full h-full flex items-center justify-center">
+            {profile?.profilePicture ? (
+              <img src={profile.profilePicture} className="w-full h-full object-cover" alt="" />
+            ) : (
+              <IconUsers size={20} />
+            )}
             {users.filter((u) => u.status === 'driving').length > 0 && (
-              <div className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-ds-success text-[8px] font-bold text-ds-bg flex items-center justify-center">
+              <div className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-ds-success text-[9px] font-bold text-ds-bg flex items-center justify-center border border-ds-bg">
                 {users.filter((u) => u.status === 'driving').length}
               </div>
             )}

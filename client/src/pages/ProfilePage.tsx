@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
@@ -506,28 +507,30 @@ export function ProfilePage() {
             </div>
 
             {/* Theme */}
-            <div>
+            <div className="opacity-40 pointer-events-none">
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-ds-text-muted"><IconPalette size={20} /></span>
                 <div className="text-sm font-medium">Darstellung</div>
+                <span className="text-[10px] text-ds-text-muted ml-auto bg-ds-surface-2 px-2 py-0.5 rounded-full">Bald verfügbar</span>
               </div>
               <SegmentedControl
                 options={[{ value: 'dark' as const, label: 'Dunkel' }, { value: 'light' as const, label: 'Hell' }, { value: 'system' as const, label: 'System' }]}
                 value={profile?.settings.theme ?? 'dark'}
-                onChange={(v) => updateSettings({ theme: v })}
+                onChange={() => {}}
               />
             </div>
 
             {/* Privacy */}
-            <div>
+            <div className="opacity-40 pointer-events-none">
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-ds-text-muted"><IconLock size={20} /></span>
                 <div className="text-sm font-medium">Sichtbarkeit</div>
+                <span className="text-[10px] text-ds-text-muted ml-auto bg-ds-surface-2 px-2 py-0.5 rounded-full">Bald verfügbar</span>
               </div>
               <SegmentedControl
                 options={[{ value: 'public' as const, label: 'Öffentlich' }, { value: 'friends' as const, label: 'Freunde' }, { value: 'private' as const, label: 'Privat' }]}
                 value={profile?.settings.privacy ?? 'public'}
-                onChange={(v) => updateSettings({ privacy: v })}
+                onChange={() => {}}
               />
             </div>
 
@@ -593,7 +596,7 @@ export function ProfilePage() {
         <div className="h-28" />
 
         {/* Logout confirmation */}
-        {showLogout && (
+        {showLogout && createPortal(
           <>
             <motion.div
               className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
@@ -619,7 +622,8 @@ export function ProfilePage() {
                 </Button>
               </div>
             </motion.div>
-          </>
+          </>,
+          document.body,
         )}
       </div>
     </Layout>

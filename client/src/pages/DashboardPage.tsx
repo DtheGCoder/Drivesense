@@ -23,7 +23,7 @@ const item = {
 
 // Helpers
 function formatDistance(meters: number): string {
-  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`;
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
 }
 
 function formatDuration(seconds: number): string {

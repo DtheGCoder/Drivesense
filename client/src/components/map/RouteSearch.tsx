@@ -666,7 +666,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
 
   return (
     <motion.div
-      className="absolute top-0 left-0 right-0 z-30 pt-safe-top"
+      className="absolute top-0 left-0 right-0 z-30 pt-safe-top pointer-events-auto"
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
