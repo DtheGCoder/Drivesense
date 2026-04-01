@@ -534,7 +534,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
       setIsMapCollapsed(true);
     };
     const handleIdle = () => {
-      collapseTimerRef.current = setTimeout(() => setIsMapCollapsed(false), 3000);
+      collapseTimerRef.current = setTimeout(() => setIsMapCollapsed(false), 1500);
     };
     map.on('movestart', handleMoveStart);
     map.on('idle', handleIdle);
