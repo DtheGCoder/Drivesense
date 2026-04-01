@@ -41,6 +41,7 @@ export interface RouteResult {
   duration: number;
   distance: number;
   steps: RouteStep[];
+  maxspeeds?: (number | null)[];
 }
 
 interface MapContextValue {
@@ -333,7 +334,7 @@ export function MapProvider({ children }: { children: ReactNode }) {
   const fetchRoute = useCallback(async (from: [number, number], to: [number, number]): Promise<RouteResult | null> => {
     if (!MAPBOX_TOKEN) return null;
     try {
-      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&steps=true&banner_instructions=true&language=de&access_token=${MAPBOX_TOKEN}`;
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&steps=true&banner_instructions=true&annotations=maxspeed&language=de&access_token=${MAPBOX_TOKEN}`;
       const res = await fetch(url);
       if (!res.ok) return null;
       const data = await res.json();
@@ -353,11 +354,19 @@ export function MapProvider({ children }: { children: ReactNode }) {
         });
         })
       );
+      // Parse maxspeed annotations (one per coordinate pair in each leg)
+      const maxspeeds: (number | null)[] = (route.legs ?? []).flatMap((leg: Record<string, unknown>) => {
+        const annotation = leg.annotation as Record<string, unknown> | undefined;
+        const speeds = annotation?.maxspeed as { speed: number; unit: string; unknown?: boolean }[] | undefined;
+        if (!speeds) return [];
+        return speeds.map((s) => s.unknown ? null : (s.unit === 'mph' ? Math.round(s.speed * 1.60934) : s.speed));
+      });
       return {
         coordinates: route.geometry.coordinates as [number, number][],
         duration: route.duration as number,
         distance: route.distance as number,
         steps,
+        maxspeeds: maxspeeds.length > 0 ? maxspeeds : undefined,
       };
     } catch {
       return null;
@@ -381,18 +390,26 @@ export function MapProvider({ children }: { children: ReactNode }) {
         };
       });
     });
+    const maxspeeds: (number | null)[] = ((route.legs as unknown[]) ?? []).flatMap((leg: unknown) => {
+      const l = leg as Record<string, unknown>;
+      const annotation = l.annotation as Record<string, unknown> | undefined;
+      const speeds = annotation?.maxspeed as { speed: number; unit: string; unknown?: boolean }[] | undefined;
+      if (!speeds) return [];
+      return speeds.map((s) => s.unknown ? null : (s.unit === 'mph' ? Math.round(s.speed * 1.60934) : s.speed));
+    });
     return {
       coordinates: (route.geometry as Record<string, unknown>).coordinates as [number, number][],
       duration: route.duration as number,
       distance: route.distance as number,
       steps,
+      maxspeeds: maxspeeds.length > 0 ? maxspeeds : undefined,
     };
   };
 
   const fetchRoutes = useCallback(async (from: [number, number], to: [number, number]): Promise<RouteResult[]> => {
     if (!MAPBOX_TOKEN) return [];
     try {
-      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&steps=true&alternatives=true&banner_instructions=true&language=de&access_token=${MAPBOX_TOKEN}`;
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from[0]},${from[1]};${to[0]},${to[1]}?geometries=geojson&overview=full&steps=true&alternatives=true&banner_instructions=true&annotations=maxspeed&language=de&access_token=${MAPBOX_TOKEN}`;
       const res = await fetch(url);
       if (!res.ok) return [];
       const data = await res.json();

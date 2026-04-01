@@ -27,6 +27,7 @@ interface RouteInfo {
   duration: number;
   coordinates: [number, number][];
   steps: RouteStep[];
+  maxspeeds?: (number | null)[];
 }
 
 // ─── Maneuver Icons ──────────────────────────────────────────────────────────
@@ -406,9 +407,10 @@ const ALT_ROUTE_COLORS = ['#6366f1', '#f59e0b'];
 interface RouteSearchProps {
   isOpen: boolean;
   onClose: () => void;
+  onSpeedLimit?: (limit: number | null) => void;
 }
 
-export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
+export function RouteSearch({ isOpen, onClose, onSpeedLimit }: RouteSearchProps) {
   const { flyTo, easeTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, fetchRoute, fetchRoutes, map } = useMap();
   const { position: gpsPosition } = useGeolocation({ autoStart: true });
   const calculateFuelCost = useProfileStore((s) => s.calculateFuelCost);
@@ -532,7 +534,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
       if (routes.length > 0) {
         const main = routes[0]!;
         drawRoute(main.coordinates);
-        setRouteInfo({ distance: main.distance, duration: main.duration, coordinates: main.coordinates, steps: main.steps });
+        setRouteInfo({ distance: main.distance, duration: main.duration, coordinates: main.coordinates, steps: main.steps, maxspeeds: main.maxspeeds });
         setRemainingDistance(main.distance);
 
         if (routes.length > 1) {
@@ -552,6 +554,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
       let totalDuration = 0;
       let allCoords: [number, number][] = [];
       let allSteps: RouteStep[] = [];
+      let allMaxspeeds: (number | null)[] = [];
 
       for (let i = 0; i < points.length - 1; i++) {
         const from = points[i]!.center;
@@ -562,12 +565,13 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           totalDuration += result.duration;
           allCoords = allCoords.length > 0 ? [...allCoords, ...result.coordinates.slice(1)] : result.coordinates;
           allSteps = [...allSteps, ...result.steps];
+          if (result.maxspeeds) allMaxspeeds = [...allMaxspeeds, ...result.maxspeeds];
         }
       }
 
       if (allCoords.length > 0) {
         drawRoute(allCoords);
-        setRouteInfo({ distance: totalDistance, duration: totalDuration, coordinates: allCoords, steps: allSteps });
+        setRouteInfo({ distance: totalDistance, duration: totalDuration, coordinates: allCoords, steps: allSteps, maxspeeds: allMaxspeeds.length > 0 ? allMaxspeeds : undefined });
         setRemainingDistance(totalDistance);
 
         const arrivalTime = new Date(Date.now() + totalDuration * 1000);
@@ -631,12 +635,13 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
       duration: routeInfo.duration,
       distance: routeInfo.distance,
       steps: routeInfo.steps,
+      maxspeeds: routeInfo.maxspeeds,
     };
     const newAlts = [...alternativeRoutes];
     newAlts[altIndex] = oldMain;
 
     drawRoute(selected.coordinates);
-    setRouteInfo({ distance: selected.distance, duration: selected.duration, coordinates: selected.coordinates, steps: selected.steps });
+    setRouteInfo({ distance: selected.distance, duration: selected.duration, coordinates: selected.coordinates, steps: selected.steps, maxspeeds: selected.maxspeeds });
     setRemainingDistance(selected.distance);
 
     const arrivalTime = new Date(Date.now() + selected.duration * 1000);
@@ -701,7 +706,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           fetchRoute(userPos, endPoint.center).then((result) => {
             if (result) {
               drawRoute(result.coordinates);
-              setRouteInfo({ distance: result.distance, duration: result.duration, coordinates: result.coordinates, steps: result.steps });
+              setRouteInfo({ distance: result.distance, duration: result.duration, coordinates: result.coordinates, steps: result.steps, maxspeeds: result.maxspeeds });
               setRemainingDistance(result.distance);
               setCurrentStepIndex(0);
               const arr = new Date(Date.now() + result.duration * 1000);
@@ -746,6 +751,22 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     const arrivalTime = new Date(Date.now() + remainTime * 1000);
     setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
 
+    // Speed limit lookup: find closest coordinate on route, look up maxspeed at that index
+    if (onSpeedLimit && routeInfo.maxspeeds && routeInfo.coordinates.length > 1) {
+      let closestCoordIdx = 0;
+      let closestCoordDist = Infinity;
+      for (let i = 0; i < routeInfo.coordinates.length; i++) {
+        const c = routeInfo.coordinates[i]!;
+        const dx = (c[0] - userPos[0]) * 111320 * Math.cos(userPos[1] * Math.PI / 180);
+        const dy = (c[1] - userPos[1]) * 110540;
+        const d = dx * dx + dy * dy;
+        if (d < closestCoordDist) { closestCoordDist = d; closestCoordIdx = i; }
+      }
+      // maxspeeds array has n-1 entries for n coordinates (one per segment)
+      const msIdx = Math.min(closestCoordIdx, routeInfo.maxspeeds.length - 1);
+      onSpeedLimit(routeInfo.maxspeeds[msIdx] ?? null);
+    }
+
     // Smooth heading for navigation
     const rawHeading = gpsPosition.heading ?? 0;
     const speed = gpsPosition.speed ?? 0;
@@ -775,7 +796,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     } else {
       easeTo({ center: userPos, zoom: 17, pitch: 60, duration: 800 });
     }
-  }, [view, gpsPosition, routeInfo, currentStepIndex, easeTo, isRerouting, endPoint, fetchRoute, drawRoute]);
+  }, [view, gpsPosition, routeInfo, currentStepIndex, easeTo, isRerouting, endPoint, fetchRoute, drawRoute, onSpeedLimit]);
 
   // Select search result
   const handleSelectResult = useCallback(async (result: SuggestResult) => {

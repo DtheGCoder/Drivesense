@@ -214,6 +214,7 @@ export function DrivePage() {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showRouteSearch, setShowRouteSearch] = useState(false);
   const routeSearchKeyRef = useRef(0);
+  const [currentSpeedLimit, setCurrentSpeedLimit] = useState<number | null>(null);
   const [visibleEvents, setVisibleEvents] = useState<Array<{ id: string; message: string; points: number; type: 'positive' | 'negative' | 'neutral' }>>([]);
   const [gpsMessage, setGpsMessage] = useState('');
 
@@ -760,7 +761,7 @@ export function DrivePage() {
                         )}
 
                         {visible.some((w) => w.id === 'speed') && (
-                          <SpeedDisplay speed={tripMetrics.speed} limit={50} />
+                          <SpeedDisplay speed={tripMetrics.speed} limit={currentSpeedLimit ?? undefined} />
                         )}
 
                         {visible.some((w) => w.id === 'score') && (
@@ -995,7 +996,7 @@ export function DrivePage() {
 
       {/* Route Search Overlay */}
       {showRouteSearch && (
-        <RouteSearch key={routeSearchKeyRef.current} isOpen={showRouteSearch} onClose={() => setShowRouteSearch(false)} />
+        <RouteSearch key={routeSearchKeyRef.current} isOpen={showRouteSearch} onClose={() => { setShowRouteSearch(false); setCurrentSpeedLimit(null); }} onSpeedLimit={setCurrentSpeedLimit} />
       )}
 
       {/* HUD Editor Overlay */}
