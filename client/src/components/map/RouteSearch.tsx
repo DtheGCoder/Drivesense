@@ -128,29 +128,45 @@ function getResultIcon(category?: string): string {
 
 async function geocodeSearch(query: string, proximity?: [number, number]): Promise<SearchResult[]> {
   if (!MAPBOX_TOKEN || query.length < 1) return [];
-  try {
-    const params = new URLSearchParams({
-      access_token: MAPBOX_TOKEN,
-      limit: '8',
-      language: 'de',
-      autocomplete: 'true',
-      types: 'address,poi,place,locality,neighborhood,region,district,postcode',
-    });
-    if (proximity) params.set('proximity', `${proximity[0]},${proximity[1]}`);
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.features ?? []).map((f: Record<string, unknown>) => ({
-      id: f.id as string,
-      name: (f.text ?? f.place_name) as string,
-      address: (f.place_name ?? '') as string,
-      center: f.center as [number, number],
-      category: ((f.properties as Record<string, unknown>)?.category as string) ?? undefined,
-    }));
-  } catch {
-    return [];
+
+  // Sequential radius search: try nearby first, expand if no results
+  const radiiKm = [15, 50, 150, 0]; // 0 = no bbox (worldwide)
+  for (const radiusKm of radiiKm) {
+    try {
+      const params = new URLSearchParams({
+        access_token: MAPBOX_TOKEN,
+        limit: '8',
+        language: 'de',
+        autocomplete: 'true',
+        types: 'address,poi,place,locality',
+      });
+      if (proximity) {
+        params.set('proximity', `${proximity[0]},${proximity[1]}`);
+        if (radiusKm > 0) {
+          // bbox = [minLng, minLat, maxLng, maxLat]
+          const latDeg = radiusKm / 110.574;
+          const lngDeg = radiusKm / (111.320 * Math.cos(proximity[1] * Math.PI / 180));
+          params.set('bbox', `${proximity[0] - lngDeg},${proximity[1] - latDeg},${proximity[0] + lngDeg},${proximity[1] + latDeg}`);
+        }
+      }
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const results: SearchResult[] = (data.features ?? []).map((f: Record<string, unknown>) => ({
+        id: f.id as string,
+        name: (f.text ?? f.place_name) as string,
+        address: (f.place_name ?? '') as string,
+        center: f.center as [number, number],
+        category: ((f.properties as Record<string, unknown>)?.category as string) ?? undefined,
+      }));
+      if (results.length > 0) return results;
+      // No results at this radius — try wider
+    } catch {
+      return [];
+    }
   }
+  return [];
 }
 
 async function reverseGeocode(coords: [number, number]): Promise<string> {
@@ -167,6 +183,28 @@ async function reverseGeocode(coords: [number, number]): Promise<string> {
 }
 
 // ─── Geometry Helpers ────────────────────────────────────────────────────────
+
+/** Extract only the diverging segment of an alt route vs main route */
+function getDivergingSegment(altCoords: [number, number][], mainCoords: [number, number][], thresholdM = 50): [number, number][] {
+  // Find first point where alt diverges from main
+  let startIdx = 0;
+  for (let i = 0; i < altCoords.length; i++) {
+    if (distanceToPolyline(altCoords[i]!, mainCoords) > thresholdM) {
+      startIdx = Math.max(0, i - 1); // include one point before divergence for continuity
+      break;
+    }
+  }
+  // Find last point where alt diverges from main (scan from end)
+  let endIdx = altCoords.length - 1;
+  for (let i = altCoords.length - 1; i >= startIdx; i--) {
+    if (distanceToPolyline(altCoords[i]!, mainCoords) > thresholdM) {
+      endIdx = Math.min(altCoords.length - 1, i + 1); // include one point after for continuity
+      break;
+    }
+  }
+  if (startIdx >= endIdx) return altCoords; // fully divergent or fully same — show all
+  return altCoords.slice(startIdx, endIdx + 1);
+}
 
 function distanceToSegment(p: [number, number], a: [number, number], b: [number, number]): number {
   const cosLat = Math.cos(p[1] * Math.PI / 180);
@@ -380,13 +418,15 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     if (query.length < 2) { setSearchResults([]); return; }
     setIsSearching(true);
     searchTimerRef.current = setTimeout(async () => {
-      const center = map?.getCenter();
-      const proximity: [number, number] | undefined = center ? [center.lng, center.lat] : undefined;
+      // Prefer GPS position for proximity, fall back to map center
+      const proximity: [number, number] | undefined = gpsPosition
+        ? [gpsPosition.lng, gpsPosition.lat]
+        : map?.getCenter() ? [map.getCenter().lng, map.getCenter().lat] : undefined;
       const results = await geocodeSearch(query, proximity);
       setSearchResults(results);
       setIsSearching(false);
     }, 300);
-  }, [map]);
+  }, [map, gpsPosition]);
 
   // Calculate route (with alternatives when no waypoints)
   const calculateRoute = useCallback(async () => {
@@ -421,7 +461,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
 
         if (routes.length > 1) {
           setAlternativeRoutes(routes.slice(1));
-          drawAlternativeRoutes(routes.slice(1).map((r) => r.coordinates));
+          drawAlternativeRoutes(routes.slice(1).map((r) => getDivergingSegment(r.coordinates, main.coordinates)));
         }
 
         const arrivalTime = new Date(Date.now() + main.duration * 1000);
@@ -527,7 +567,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
 
     setAlternativeRoutes(newAlts);
-    drawAlternativeRoutes(newAlts.map((r) => r.coordinates));
+    drawAlternativeRoutes(newAlts.map((r) => getDivergingSegment(r.coordinates, selected.coordinates)));
   }, [routeInfo, alternativeRoutes, drawRoute, drawAlternativeRoutes]);
 
   // Avoid cameras — select alternative route with fewest cameras
@@ -1340,8 +1380,8 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           </div>
         </div>
 
-        {/* Saved places quick-route buttons */}
-        {!activeInput && savedPlaces.length > 0 && (
+        {/* Saved places quick-route buttons — show when no query text */}
+        {savedPlaces.length > 0 && !endQuery && !routeInfo && (
           <div className="bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5 p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold">Gespeicherte Orte</span>
