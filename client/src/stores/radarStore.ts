@@ -51,7 +51,7 @@ function classifyCamera(tags: Record<string, string>): CameraType {
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const FETCH_COOLDOWN_MS = 30_000; // min 30s between fetches
-const REFETCH_DISTANCE_KM = 5; // refetch if user moved >5km from last center
+const REFETCH_DISTANCE_KM = 2; // refetch if user moved >2km from last center
 
 let lastFetchTime = 0;
 
@@ -63,7 +63,7 @@ async function fetchFromOverpass(center: [number, number], radiusKm: number): Pr
 [out:json][timeout:25];
 (
   node["highway"="speed_camera"](around:${radiusM},${lat},${lng});
-  node["enforcement"](around:${radiusM},${lat},${lng});
+  node["enforcement"~"^(maxspeed|speed|average_speed)$"](around:${radiusM},${lat},${lng});
 );
 out body;
 `;
@@ -122,7 +122,7 @@ export const useRadarStore = create<RadarState>((set, get) => ({
     set({ warningDistance: distance });
   },
 
-  fetchCameras: async (center, radiusKm = 15) => {
+  fetchCameras: async (center, radiusKm = 10) => {
     const state = get();
     if (!state.enabled || state.isLoading) return;
 

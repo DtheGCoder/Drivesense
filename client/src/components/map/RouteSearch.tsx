@@ -210,7 +210,7 @@ async function fetchRouteCameras(coords: [number, number][]): Promise<SpeedCamer
   const query = `[out:json][timeout:25];
 (
   node["highway"="speed_camera"](around:${radiusM},${centerLat},${centerLng});
-  node["enforcement"](around:${radiusM},${centerLat},${centerLng});
+  node["enforcement"~"^(maxspeed|speed|average_speed)$"](around:${radiusM},${centerLat},${centerLng});
 );
 out body;`;
 
@@ -345,6 +345,10 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   const endInputRef = useRef<HTMLInputElement>(null);
   const smoothNavBearingRef = useRef<number>(0);
   const lastNavBearingUpdateRef = useRef<number>(0);
+  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Collapsed state for overview — map interaction collapses panels
+  const [isMapCollapsed, setIsMapCollapsed] = useState(false);
 
   // Auto-fill start with GPS position — set immediately, reverse geocode in background
   const hasAutoFilledStart = useRef(false);
@@ -482,6 +486,26 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     return () => { cancelled = true; };
   }, [routeInfo]);
 
+  // Collapse overview panels when user interacts with map, expand after idle
+  useEffect(() => {
+    if (view !== 'overview' || !map) return;
+    const handleMoveStart = () => {
+      if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+      setIsMapCollapsed(true);
+    };
+    const handleIdle = () => {
+      collapseTimerRef.current = setTimeout(() => setIsMapCollapsed(false), 3000);
+    };
+    map.on('movestart', handleMoveStart);
+    map.on('idle', handleIdle);
+    return () => {
+      map.off('movestart', handleMoveStart);
+      map.off('idle', handleIdle);
+      if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+      setIsMapCollapsed(false);
+    };
+  }, [view, map]);
+
   // Select an alternative route (swap with main)
   const selectAlternativeRoute = useCallback((altIndex: number) => {
     if (!routeInfo || altIndex >= alternativeRoutes.length) return;
@@ -522,6 +546,27 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
       selectAlternativeRoute(bestIdx);
     }
   }, [alternativeRoutes, routeCameras, routeCameraCount, selectAlternativeRoute]);
+
+  // Click alternative route on map to select it
+  useEffect(() => {
+    if (view !== 'overview' || !map || alternativeRoutes.length === 0) return;
+    const handlers: { layer: string; fn: () => void }[] = [];
+    for (let i = 0; i < alternativeRoutes.length; i++) {
+      const layerId = `alt-route-layer-${i}`;
+      if (!map.getLayer(layerId)) continue;
+      const fn = () => selectAlternativeRoute(i);
+      map.on('click', layerId, fn);
+      map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+      handlers.push({ layer: layerId, fn });
+    }
+    return () => {
+      for (const { layer, fn } of handlers) {
+        map.off('click', layer, fn);
+      }
+      map.getCanvas().style.cursor = '';
+    };
+  }, [view, map, alternativeRoutes, selectAlternativeRoute]);
 
   // Navigation: track current position against route steps + off-route detection
   useEffect(() => {
@@ -835,7 +880,8 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
         <motion.div
           className="absolute top-0 left-0 right-0 pt-safe-top pointer-events-auto"
           initial={{ y: -50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
+          animate={{ y: isMapCollapsed ? -300 : 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         >
           <div className="mx-3 mt-3 bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
             <div className="p-4 space-y-2">
@@ -966,9 +1012,41 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           </div>
         </motion.div>
 
+        {/* Compact floating stats bar — visible when panels are collapsed */}
+        <AnimatePresence>
+          {isMapCollapsed && (
+            <motion.div
+              className="absolute top-0 left-0 right-0 pt-safe-top pointer-events-auto"
+              initial={{ y: -50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -50, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            >
+              <div className="mx-3 mt-3 flex items-center justify-between bg-ds-surface-2/90 backdrop-blur-xl rounded-xl px-4 py-2.5 shadow-2xl border border-white/5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-ds-primary">{formatDistance(routeInfo.distance)}</span>
+                  <span className="text-xs text-white/40">{formatDuration(routeInfo.duration)}</span>
+                  {routeCameraCount > 0 && (
+                    <span className="text-[10px] text-ds-danger flex items-center gap-0.5">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /></svg>
+                      {routeCameraCount}
+                    </span>
+                  )}
+                </div>
+                <button
+                  className="w-7 h-7 rounded-full bg-white/5 flex items-center justify-center text-white/40 active:bg-white/10"
+                  onClick={() => setIsMapCollapsed(false)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9" /></svg>
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* POI results overlay */}
         <AnimatePresence>
-          {poiResults.length > 0 && (
+          {poiResults.length > 0 && !isMapCollapsed && (
             <motion.div
               className="absolute top-[250px] left-3 right-3 z-40 pointer-events-auto bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden max-h-48 overflow-y-auto shadow-2xl border border-white/5"
               initial={{ opacity: 0, y: -10 }}
@@ -1006,8 +1084,8 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
           className="absolute bottom-0 left-0 right-0 pointer-events-auto"
           style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
           initial={{ y: 100, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.15 }}
+          animate={{ y: isMapCollapsed ? 200 : 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         >
           <div className="mx-3 mb-3 bg-ds-surface-2/95 backdrop-blur-xl rounded-2xl overflow-hidden shadow-2xl border border-white/5">
             <div className="max-h-36 overflow-y-auto">
@@ -1042,6 +1120,36 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
             </div>
           </div>
         </motion.div>
+
+        {/* Floating "Los geht's" button when collapsed */}
+        <AnimatePresence>
+          {isMapCollapsed && (
+            <motion.div
+              className="absolute bottom-0 left-0 right-0 pointer-events-auto"
+              style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
+              initial={{ y: 50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 50, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            >
+              <div className="mx-3 mb-3 flex gap-2">
+                <button
+                  className="flex-1 py-3 rounded-xl bg-ds-surface-2/90 backdrop-blur-xl text-white/60 text-sm font-medium active:bg-ds-surface-2 transition-colors shadow-2xl border border-white/5"
+                  onClick={handleClose}
+                >
+                  Abbrechen
+                </button>
+                <button
+                  className="flex-[2] py-3 rounded-xl bg-ds-primary text-ds-bg text-sm font-bold active:opacity-80 transition-opacity flex items-center justify-center gap-2 shadow-2xl"
+                  onClick={startNavigation}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="3,12 22,2 12,22 10,14" /></svg>
+                  Los geht's
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Save place modal (overview) */}
         <AnimatePresence>
