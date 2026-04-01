@@ -126,46 +126,93 @@ function getResultIcon(category?: string): string {
   return '📍';
 }
 
+// Session token for Mapbox Search Box API billing
+let searchSessionToken = crypto.randomUUID();
+
 async function geocodeSearch(query: string, proximity?: [number, number]): Promise<SearchResult[]> {
   if (!MAPBOX_TOKEN || query.length < 1) return [];
 
-  // Try with increasing search radii: nearby bbox first, then wider, then no bbox
-  const radiiKm = proximity ? [15, 50, 0] : [0];
-  for (const radiusKm of radiiKm) {
-    try {
-      const params = new URLSearchParams({
-        access_token: MAPBOX_TOKEN,
-        limit: '8',
-        language: 'de',
-        autocomplete: 'true',
-        types: 'poi,address,place,locality',
-        country: 'de,at,ch',
-      });
-      if (proximity) {
-        params.set('proximity', `${proximity[0]},${proximity[1]}`);
-        if (radiusKm > 0) {
-          const latDeg = radiusKm / 110.574;
-          const lngDeg = radiusKm / (111.320 * Math.cos(proximity[1] * Math.PI / 180));
-          params.set('bbox', `${proximity[0] - lngDeg},${proximity[1] - latDeg},${proximity[0] + lngDeg},${proximity[1] + latDeg}`);
+  // Use Mapbox Search Box API (much better POI/brand coverage than Geocoding v5)
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      access_token: MAPBOX_TOKEN,
+      session_token: searchSessionToken,
+      language: 'de',
+      limit: '8',
+      types: 'poi,address,place',
+      country: 'de,at,ch',
+    });
+    if (proximity) {
+      params.set('proximity', `${proximity[0]},${proximity[1]}`);
+    }
+    const url = `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const suggestions = data.suggestions ?? [];
+      if (suggestions.length > 0) {
+        // Retrieve full details (coordinates) for all suggestions in parallel
+        const results = await Promise.all(
+          suggestions.slice(0, 8).map(async (s: Record<string, unknown>) => {
+            const mapboxId = s.mapbox_id as string;
+            if (!mapboxId) return null;
+            try {
+              const retrieveUrl = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}?access_token=${MAPBOX_TOKEN}&session_token=${searchSessionToken}`;
+              const rRes = await fetch(retrieveUrl);
+              if (!rRes.ok) return null;
+              const rData = await rRes.json();
+              const feature = rData.features?.[0];
+              if (!feature?.geometry?.coordinates) return null;
+              const props = feature.properties ?? {};
+              return {
+                id: mapboxId,
+                name: (props.name ?? s.name ?? '') as string,
+                address: (props.full_address ?? props.address ?? s.full_address ?? '') as string,
+                center: feature.geometry.coordinates as [number, number],
+                category: (props.poi_category ?? (s as Record<string, unknown>).poi_category ?? undefined) as string | undefined,
+              };
+            } catch {
+              return null;
+            }
+          }),
+        );
+        const valid = results.filter((r): r is SearchResult => r !== null);
+        if (valid.length > 0) {
+          searchSessionToken = crypto.randomUUID(); // New session after successful search
+          return valid;
         }
       }
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const data = await res.json();
-      const results: SearchResult[] = (data.features ?? []).map((f: Record<string, unknown>) => ({
-        id: f.id as string,
-        name: (f.text ?? f.place_name) as string,
-        address: (f.place_name ?? '') as string,
-        center: f.center as [number, number],
-        category: ((f.properties as Record<string, unknown>)?.category as string) ?? undefined,
-      }));
-      if (results.length > 0) return results;
-    } catch {
-      return [];
     }
+  } catch {
+    // Fall through to v5 geocoding
   }
-  return [];
+
+  // Fallback: Mapbox Geocoding v5
+  try {
+    const params = new URLSearchParams({
+      access_token: MAPBOX_TOKEN,
+      limit: '8',
+      language: 'de',
+      autocomplete: 'true',
+      types: 'poi,address,place,locality',
+      country: 'de,at,ch',
+    });
+    if (proximity) params.set('proximity', `${proximity[0]},${proximity[1]}`);
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.features ?? []).map((f: Record<string, unknown>) => ({
+      id: f.id as string,
+      name: (f.text ?? f.place_name) as string,
+      address: (f.place_name ?? '') as string,
+      center: f.center as [number, number],
+      category: ((f.properties as Record<string, unknown>)?.category as string) ?? undefined,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 async function reverseGeocode(coords: [number, number]): Promise<string> {
