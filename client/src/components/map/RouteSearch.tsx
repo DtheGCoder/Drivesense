@@ -129,10 +129,18 @@ function getResultIcon(category?: string): string {
 // Session token for Mapbox Search Box API billing
 let searchSessionToken = crypto.randomUUID();
 
-async function geocodeSearch(query: string, proximity?: [number, number]): Promise<SearchResult[]> {
+interface SuggestResult {
+  id: string;
+  name: string;
+  address: string;
+  mapbox_id: string;
+  center?: [number, number]; // filled on retrieve
+  category?: string;
+}
+
+async function searchSuggest(query: string, proximity?: [number, number]): Promise<SuggestResult[]> {
   if (!MAPBOX_TOKEN || query.length < 1) return [];
 
-  // Use Mapbox Search Box API (much better POI/brand coverage than Geocoding v5)
   try {
     const params = new URLSearchParams({
       q: query,
@@ -150,51 +158,74 @@ async function geocodeSearch(query: string, proximity?: [number, number]): Promi
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
-      const suggestions = data.suggestions ?? [];
+      const suggestions = (data.suggestions ?? []) as Record<string, unknown>[];
       if (suggestions.length > 0) {
-        // Retrieve full details (coordinates) for all suggestions in parallel
-        const results = await Promise.all(
-          suggestions.slice(0, 8).map(async (s: Record<string, unknown>) => {
-            const mapboxId = s.mapbox_id as string;
-            if (!mapboxId) return null;
-            try {
-              const retrieveUrl = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}?access_token=${MAPBOX_TOKEN}&session_token=${searchSessionToken}`;
-              const rRes = await fetch(retrieveUrl);
-              if (!rRes.ok) return null;
-              const rData = await rRes.json();
-              const feature = rData.features?.[0];
-              if (!feature?.geometry?.coordinates) return null;
-              const props = feature.properties ?? {};
-              return {
-                id: mapboxId,
-                name: (props.name ?? s.name ?? '') as string,
-                address: (props.full_address ?? props.address ?? s.full_address ?? '') as string,
-                center: feature.geometry.coordinates as [number, number],
-                category: (props.poi_category ?? (s as Record<string, unknown>).poi_category ?? undefined) as string | undefined,
-              };
-            } catch {
-              return null;
-            }
-          }),
-        );
-        const valid = results.filter((r): r is SearchResult => r !== null);
-        if (valid.length > 0) {
-          searchSessionToken = crypto.randomUUID(); // New session after successful search
-          return valid;
-        }
+        return suggestions.slice(0, 8).map((s) => ({
+          id: (s.mapbox_id ?? '') as string,
+          mapbox_id: (s.mapbox_id ?? '') as string,
+          name: (s.name ?? '') as string,
+          address: (s.full_address ?? s.place_formatted ?? s.address ?? '') as string,
+          category: (s.poi_category as string) ?? undefined,
+        }));
       }
     }
   } catch {
-    // Fall through to v5 geocoding
+    // Fall through to v5
   }
 
-  // Fallback: Mapbox Geocoding v5
+  // Fallback: v5 geocoding (returns coordinates directly)
   try {
     const params = new URLSearchParams({
       access_token: MAPBOX_TOKEN,
       limit: '8',
       language: 'de',
       autocomplete: 'true',
+      types: 'poi,address,place,locality',
+      country: 'de,at,ch',
+    });
+    if (proximity) params.set('proximity', `${proximity[0]},${proximity[1]}`);
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.features ?? []).map((f: Record<string, unknown>) => ({
+      id: f.id as string,
+      mapbox_id: '',
+      name: (f.text ?? f.place_name) as string,
+      address: (f.place_name ?? '') as string,
+      center: f.center as [number, number],
+      category: ((f.properties as Record<string, unknown>)?.category as string) ?? undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function retrieveCoordinates(mapboxId: string): Promise<[number, number] | null> {
+  if (!MAPBOX_TOKEN || !mapboxId) return null;
+  try {
+    const url = `https://api.mapbox.com/search/searchbox/v1/retrieve/${mapboxId}?access_token=${MAPBOX_TOKEN}&session_token=${searchSessionToken}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const coords = data.features?.[0]?.geometry?.coordinates;
+    if (coords) {
+      searchSessionToken = crypto.randomUUID();
+      return coords as [number, number];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function geocodeSearch(query: string, proximity?: [number, number]): Promise<SearchResult[]> {
+  if (!MAPBOX_TOKEN || query.length < 1) return [];
+  try {
+    const params = new URLSearchParams({
+      access_token: MAPBOX_TOKEN,
+      limit: '5',
+      language: 'de',
       types: 'poi,address,place,locality',
       country: 'de,at,ch',
     });
@@ -389,7 +420,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   const [startQuery, setStartQuery] = useState('');
   const [endQuery, setEndQuery] = useState('');
   const [activeInput, setActiveInput] = useState<'start' | 'end' | null>(null);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<SuggestResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   // Route state
@@ -464,11 +495,10 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     if (query.length < 2) { setSearchResults([]); return; }
     setIsSearching(true);
     searchTimerRef.current = setTimeout(async () => {
-      // Prefer GPS position for proximity, fall back to map center
       const proximity: [number, number] | undefined = gpsPosition
         ? [gpsPosition.lng, gpsPosition.lat]
         : map?.getCenter() ? [map.getCenter().lng, map.getCenter().lat] : undefined;
-      const results = await geocodeSearch(query, proximity);
+      const results = await searchSuggest(query, proximity);
       setSearchResults(results);
       setIsSearching(false);
     }, 300);
@@ -748,8 +778,17 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
   }, [view, gpsPosition, routeInfo, currentStepIndex, easeTo, isRerouting, endPoint, fetchRoute, drawRoute]);
 
   // Select search result
-  const handleSelectResult = useCallback((result: SearchResult) => {
-    const wp: RouteWaypoint = { id: result.id, label: result.name, center: result.center };
+  const handleSelectResult = useCallback(async (result: SuggestResult) => {
+    setSearchResults([]);
+    setActiveInput(null);
+
+    let center = result.center;
+    if (!center && result.mapbox_id) {
+      center = await retrieveCoordinates(result.mapbox_id) ?? undefined;
+    }
+    if (!center) return;
+
+    const wp: RouteWaypoint = { id: result.id, label: result.name, center };
     if (activeInput === 'start') {
       setStartPoint(wp);
       setStartQuery(result.name);
@@ -757,8 +796,6 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
       setEndPoint(wp);
       setEndQuery(result.name);
     }
-    setSearchResults([]);
-    setActiveInput(null);
   }, [activeInput]);
 
   // Start navigation
@@ -1463,7 +1500,7 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
                 <button
                   key={`saved-${place.id}`}
                   className="w-full flex items-center gap-3 px-4 py-3 text-left border-b border-white/5 active:bg-white/5 transition-colors"
-                  onClick={() => handleSelectResult({ id: place.id, name: place.name, address: place.address, center: place.center })}
+                  onClick={() => handleSelectResult({ id: place.id, name: place.name, address: place.address, center: place.center, mapbox_id: '' })}
                 >
                   <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
                     <PlaceIcon icon={place.icon} size={18} color={place.color} />
