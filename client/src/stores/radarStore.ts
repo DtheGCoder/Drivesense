@@ -49,7 +49,11 @@ function classifyCamera(tags: Record<string, string>): CameraType {
 
 // ─── Overpass API fetch ──────────────────────────────────────────────────────
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_SERVERS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
 const FETCH_COOLDOWN_MS = 30_000; // min 30s between fetches
 const REFETCH_DISTANCE_KM = 2; // refetch if user moved >2km from last center
 
@@ -60,7 +64,7 @@ async function fetchFromOverpass(center: [number, number], radiusKm: number): Pr
   const radiusM = radiusKm * 1000;
 
   const query = `
-[out:json][timeout:25];
+[out:json][timeout:15];
 (
   node["highway"="speed_camera"](around:${radiusM},${lat},${lng});
   node["enforcement"~"^(maxspeed|speed|average_speed)$"](around:${radiusM},${lat},${lng});
@@ -68,37 +72,51 @@ async function fetchFromOverpass(center: [number, number], radiusKm: number): Pr
 out body;
 `;
 
-  const res = await fetch(OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-  });
+  let lastErr: Error | null = null;
+  for (const server of OVERPASS_SERVERS) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch(server, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-  if (!res.ok) throw new Error(`Overpass API error: ${res.status}`);
-  const data = await res.json();
+      if (!res.ok) { lastErr = new Error(`${res.status}`); continue; }
+      const data = await res.json();
 
-  const seen = new Set<number>();
-  const cameras: SpeedCamera[] = [];
+      const seen = new Set<number>();
+      const cameras: SpeedCamera[] = [];
 
-  for (const el of data.elements ?? []) {
-    if (el.type !== 'node' || seen.has(el.id)) continue;
-    seen.add(el.id);
-    const tags = (el.tags ?? {}) as Record<string, string>;
-    const type = classifyCamera(tags);
-    const maxspeedStr = tags['maxspeed'];
-    const directionStr = tags['direction'];
+      for (const el of data.elements ?? []) {
+        if (el.type !== 'node' || seen.has(el.id)) continue;
+        seen.add(el.id);
+        const tags = (el.tags ?? {}) as Record<string, string>;
+        const type = classifyCamera(tags);
+        const maxspeedStr = tags['maxspeed'];
+        const directionStr = tags['direction'];
 
-    cameras.push({
-      id: el.id,
-      lat: el.lat,
-      lng: el.lon,
-      type,
-      maxspeed: maxspeedStr ? parseInt(maxspeedStr, 10) || undefined : undefined,
-      direction: directionStr ? parseFloat(directionStr) || undefined : undefined,
-    });
+        cameras.push({
+          id: el.id,
+          lat: el.lat,
+          lng: el.lon,
+          type,
+          maxspeed: maxspeedStr ? parseInt(maxspeedStr, 10) || undefined : undefined,
+          direction: directionStr ? parseFloat(directionStr) || undefined : undefined,
+        });
+      }
+
+      return cameras;
+    } catch (err) {
+      lastErr = err as Error;
+      continue;
+    }
   }
 
-  return cameras;
+  throw lastErr ?? new Error('All Overpass servers failed');
 }
 
 // ─── Store ───────────────────────────────────────────────────────────────────
