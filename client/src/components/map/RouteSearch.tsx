@@ -129,8 +129,8 @@ function getResultIcon(category?: string): string {
 async function geocodeSearch(query: string, proximity?: [number, number]): Promise<SearchResult[]> {
   if (!MAPBOX_TOKEN || query.length < 1) return [];
 
-  // Sequential radius search: try nearby first, expand if no results
-  const radiiKm = [15, 50, 150, 0]; // 0 = no bbox (worldwide)
+  // Try with increasing search radii: nearby bbox first, then wider, then no bbox
+  const radiiKm = proximity ? [15, 50, 0] : [0];
   for (const radiusKm of radiiKm) {
     try {
       const params = new URLSearchParams({
@@ -138,12 +138,12 @@ async function geocodeSearch(query: string, proximity?: [number, number]): Promi
         limit: '8',
         language: 'de',
         autocomplete: 'true',
-        types: 'address,poi,place,locality',
+        types: 'poi,address,place,locality',
+        country: 'de,at,ch',
       });
       if (proximity) {
         params.set('proximity', `${proximity[0]},${proximity[1]}`);
         if (radiusKm > 0) {
-          // bbox = [minLng, minLat, maxLng, maxLat]
           const latDeg = radiusKm / 110.574;
           const lngDeg = radiusKm / (111.320 * Math.cos(proximity[1] * Math.PI / 180));
           params.set('bbox', `${proximity[0] - lngDeg},${proximity[1] - latDeg},${proximity[0] + lngDeg},${proximity[1] + latDeg}`);
@@ -151,7 +151,7 @@ async function geocodeSearch(query: string, proximity?: [number, number]): Promi
       }
       const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
       const res = await fetch(url);
-      if (!res.ok) return [];
+      if (!res.ok) continue;
       const data = await res.json();
       const results: SearchResult[] = (data.features ?? []).map((f: Record<string, unknown>) => ({
         id: f.id as string,
@@ -161,7 +161,6 @@ async function geocodeSearch(query: string, proximity?: [number, number]): Promi
         category: ((f.properties as Record<string, unknown>)?.category as string) ?? undefined,
       }));
       if (results.length > 0) return results;
-      // No results at this radius — try wider
     } catch {
       return [];
     }
@@ -587,18 +586,18 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     }
   }, [alternativeRoutes, routeCameras, routeCameraCount, selectAlternativeRoute]);
 
-  // Click alternative route on map to select it
+  // Click alternative route on map to select it (uses wide hitbox layer)
   useEffect(() => {
     if (view !== 'overview' || !map || alternativeRoutes.length === 0) return;
     const handlers: { layer: string; fn: () => void }[] = [];
     for (let i = 0; i < alternativeRoutes.length; i++) {
-      const layerId = `alt-route-layer-${i}`;
-      if (!map.getLayer(layerId)) continue;
+      const hitboxId = `alt-route-hitbox-${i}`;
+      if (!map.getLayer(hitboxId)) continue;
       const fn = () => selectAlternativeRoute(i);
-      map.on('click', layerId, fn);
-      map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
-      handlers.push({ layer: layerId, fn });
+      map.on('click', hitboxId, fn);
+      map.on('mouseenter', hitboxId, () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', hitboxId, () => { map.getCanvas().style.cursor = ''; });
+      handlers.push({ layer: hitboxId, fn });
     }
     return () => {
       for (const { layer, fn } of handlers) {

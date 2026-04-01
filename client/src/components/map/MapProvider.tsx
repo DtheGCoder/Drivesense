@@ -193,6 +193,14 @@ export function MapProvider({ children }: { children: ReactNode }) {
           type: 'geojson',
           data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } },
         });
+        // Invisible wide hitbox for easier tap/click
+        map.addLayer({
+          id: `alt-route-hitbox-${i}`,
+          type: 'line',
+          source: `alt-route-source-${i}`,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#000', 'line-width': 30, 'line-opacity': 0 },
+        });
         map.addLayer({
           id: `alt-route-outline-${i}`,
           type: 'line',
