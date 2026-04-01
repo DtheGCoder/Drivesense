@@ -48,6 +48,7 @@ interface MapContextValue {
   loaded: boolean;
   hasToken: boolean;
   flyTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => void;
+  easeTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => void;
   drawRoute: (coordinates: [number, number][]) => void;
   clearRoute: () => void;
   drawAlternativeRoutes: (routes: [number, number][][]) => void;
@@ -268,6 +269,14 @@ export function MapProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const easeTo = useCallback((opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => {
+    singletonMap?.easeTo({
+      ...opts,
+      essential: true,
+      duration: opts.duration ?? 800,
+    });
+  }, []);
+
   const drawRoute = useCallback((coordinates: [number, number][]) => {
     const source = singletonMap?.getSource(ROUTE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
     if (!source) return;
@@ -467,7 +476,7 @@ export function MapProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <MapContext.Provider value={{ map: singletonMap, loaded, hasToken, flyTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, drawBreadcrumb, clearBreadcrumb, fetchRoute, fetchRoutes, addUserRoute, removeUserRoute, clearAllUserRoutes, setInteractive }}>
+    <MapContext.Provider value={{ map: singletonMap, loaded, hasToken, flyTo, easeTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, drawBreadcrumb, clearBreadcrumb, fetchRoute, fetchRoutes, addUserRoute, removeUserRoute, clearAllUserRoutes, setInteractive }}>
       {children}
     </MapContext.Provider>
   );

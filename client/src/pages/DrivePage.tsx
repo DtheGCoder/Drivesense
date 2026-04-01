@@ -186,7 +186,7 @@ function createDriveMarkerElement(user: LiveUser): HTMLDivElement {
 
 export function DrivePage() {
   const navigate = useNavigate();
-  const { map, loaded, flyTo, drawBreadcrumb, clearBreadcrumb, clearRoute } = useMap();
+  const { map, loaded, flyTo, easeTo, drawBreadcrumb, clearBreadcrumb, clearRoute } = useMap();
   // Subscribe to individual reactive values from trip store
   const tripStatus = useTripStore((s) => s.status);
   const tripMode = useTripStore((s) => s.mode);
@@ -231,6 +231,12 @@ export function DrivePage() {
   const speedSamplesRef = useRef<number[]>([]);
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
 
+  // Smooth heading filter — prevents jerky map rotation
+  const smoothBearingRef = useRef<number>(0);
+  const lastBearingUpdateRef = useRef<number>(0);
+  const HEADING_THRESHOLD = 8; // degrees — minimum change to trigger rotation
+  const HEADING_SMOOTHING = 0.35; // 0-1 — lower = smoother (more lag), higher = more responsive
+
   const isRecording = tripStatus === 'recording';
   const isIdle = tripStatus === 'idle';
 
@@ -252,15 +258,15 @@ export function DrivePage() {
     for (const user of users) {
       const existing = markersRef.current.get(user.id);
       if (existing) {
-        existing.setLngLat(user.position);
-        existing.setRotation(user.heading);
-      } else {
-        const el = createDriveMarkerElement(user);
-        const marker = new mapboxgl.Marker({ element: el, rotation: user.heading, rotationAlignment: 'map' })
-          .setLngLat(user.position)
-          .addTo(map);
-        markersRef.current.set(user.id, marker);
+        // Remove and recreate to update speed label / avatar
+        existing.remove();
+        markersRef.current.delete(user.id);
       }
+      const el = createDriveMarkerElement(user);
+      const marker = new mapboxgl.Marker({ element: el, rotation: user.heading, rotationAlignment: 'map' })
+        .setLngLat(user.position)
+        .addTo(map);
+      markersRef.current.set(user.id, marker);
     }
   }, [map, loaded, users]);
 
@@ -413,8 +419,33 @@ export function DrivePage() {
       altitude: position.altitude ?? 0,
     });
 
-    // Follow user on map
-    flyTo({ center: [position.lng, position.lat], duration: 800 });
+    // Follow user on map with smooth heading rotation
+    const rawHeading = position.heading ?? 0;
+    if (speedKmh > 5 && rawHeading !== null) {
+      // Smooth the heading with exponential moving average
+      const prev = smoothBearingRef.current;
+      let diff = rawHeading - prev;
+      // Normalize to [-180, 180]
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      const smoothed = prev + diff * HEADING_SMOOTHING;
+      // Normalize to [0, 360]
+      const normalizedBearing = ((smoothed % 360) + 360) % 360;
+
+      // Only update map bearing when change exceeds threshold
+      const bearingDiff = Math.abs(diff);
+      const now = Date.now();
+      if (bearingDiff > HEADING_THRESHOLD || now - lastBearingUpdateRef.current > 3000) {
+        smoothBearingRef.current = normalizedBearing;
+        lastBearingUpdateRef.current = now;
+        easeTo({ center: [position.lng, position.lat], bearing: normalizedBearing, pitch: 60, zoom: 17, duration: 1000 });
+      } else {
+        smoothBearingRef.current = normalizedBearing;
+        easeTo({ center: [position.lng, position.lat], duration: 800 });
+      }
+    } else {
+      easeTo({ center: [position.lng, position.lat], duration: 800 });
+    }
 
     // Draw breadcrumb trail
     if (routePointsRef.current.length >= 2) {
@@ -429,7 +460,7 @@ export function DrivePage() {
       fetchCameras([position.lng, position.lat]);
       checkProximity(position.lat, position.lng, position.heading ?? undefined);
     }
-  }, [isRecording, position, flyTo, drawBreadcrumb, haversineDistance, radarEnabled, fetchCameras, checkProximity]);
+  }, [isRecording, position, easeTo, drawBreadcrumb, haversineDistance, radarEnabled, fetchCameras, checkProximity]);
 
   const handleStartRecording = useCallback((mode: TripMode) => {
     const store = useTripStore.getState();
@@ -446,12 +477,14 @@ export function DrivePage() {
     maxGForceRef.current = 0;
     scoreRef.current = 100;
     speedSamplesRef.current = [];
+    smoothBearingRef.current = 0;
+    lastBearingUpdateRef.current = 0;
 
     // Start GPS
     startTracking();
 
     // Tilt map for driving perspective
-    flyTo({ pitch: 60, zoom: 16.5, bearing: 0, duration: 1500 });
+    flyTo({ pitch: 60, zoom: 17, bearing: 0, duration: 1500 });
   }, [flyTo, startTracking]);
 
   const handleStopRecording = useCallback(() => {

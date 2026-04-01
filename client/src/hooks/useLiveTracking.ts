@@ -113,14 +113,24 @@ export function useLiveTracking(options: LiveTrackingOptions = {}) {
           const data = JSON.parse(event.data);
           if (data.type === 'users' && Array.isArray(data.users)) {
             const serverUsers = data.users as ServerUser[];
-            const liveUsers: LiveUser[] = serverUsers.map((su) => {
+            // Filter out users with no valid position (e.g. server center default)
+            const liveUsers: LiveUser[] = serverUsers
+              .filter((su) => {
+                if (!su.position) return false;
+                const [lng, lat] = su.position;
+                // Reject [0,0] and positions suspiciously close to Frankfurt server center
+                if (lng === 0 && lat === 0) return false;
+                if (Math.abs(lng - 8.6821) < 0.01 && Math.abs(lat - 50.1109) < 0.01) return false;
+                return true;
+              })
+              .map((su) => {
               const isSelf = su.id === authUser!.id;
               return {
                 id: su.id,
                 username: su.username,
                 initials: su.username.slice(0, 2).toUpperCase(),
                 color: isSelf ? USER_COLORS[0]! : assignColor(su.id),
-                position: su.position ?? [8.67, 50.11],
+                position: su.position!,
                 heading: su.heading,
                 status: (su.status === 'driving' ? 'driving' : 'idle') as 'idle' | 'driving',
                 speed: su.speed,

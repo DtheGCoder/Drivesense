@@ -294,7 +294,7 @@ interface RouteSearchProps {
 }
 
 export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
-  const { flyTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, fetchRoute, fetchRoutes, map } = useMap();
+  const { flyTo, easeTo, drawRoute, clearRoute, drawAlternativeRoutes, clearAlternativeRoutes, fetchRoute, fetchRoutes, map } = useMap();
   const { position: gpsPosition } = useGeolocation({ autoStart: true });
   const calculateFuelCost = useProfileStore((s) => s.calculateFuelCost);
 
@@ -343,6 +343,8 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const endInputRef = useRef<HTMLInputElement>(null);
+  const smoothNavBearingRef = useRef<number>(0);
+  const lastNavBearingUpdateRef = useRef<number>(0);
 
   // Auto-fill start with GPS position — set immediately, reverse geocode in background
   const hasAutoFilledStart = useRef(false);
@@ -583,8 +585,36 @@ export function RouteSearch({ isOpen, onClose }: RouteSearchProps) {
     const arrivalTime = new Date(Date.now() + remainTime * 1000);
     setEta(arrivalTime.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }));
 
-    flyTo({ center: userPos, zoom: 17, pitch: 60, bearing: gpsPosition.heading ?? 0, duration: 800 });
-  }, [view, gpsPosition, routeInfo, currentStepIndex, flyTo, isRerouting, endPoint, fetchRoute, drawRoute]);
+    // Smooth heading for navigation
+    const rawHeading = gpsPosition.heading ?? 0;
+    const speed = gpsPosition.speed ?? 0;
+    const speedKmh = speed * 3.6;
+
+    if (speedKmh > 5 && rawHeading != null) {
+      const prev = smoothNavBearingRef.current;
+      let diff = rawHeading - prev;
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      let smoothed = prev + diff * 0.35;
+      if (smoothed < 0) smoothed += 360;
+      if (smoothed >= 360) smoothed -= 360;
+      smoothNavBearingRef.current = smoothed;
+
+      let bearingDiff = Math.abs(smoothed - prev);
+      if (bearingDiff > 180) bearingDiff = 360 - bearingDiff;
+      const now = Date.now();
+      const elapsed = now - lastNavBearingUpdateRef.current;
+
+      if (bearingDiff > 8 || elapsed > 3000) {
+        lastNavBearingUpdateRef.current = now;
+        easeTo({ center: userPos, zoom: 17, pitch: 60, bearing: smoothed, duration: 1000 });
+      } else {
+        easeTo({ center: userPos, duration: 800 });
+      }
+    } else {
+      easeTo({ center: userPos, zoom: 17, pitch: 60, duration: 800 });
+    }
+  }, [view, gpsPosition, routeInfo, currentStepIndex, easeTo, isRerouting, endPoint, fetchRoute, drawRoute]);
 
   // Select search result
   const handleSelectResult = useCallback((result: SearchResult) => {
