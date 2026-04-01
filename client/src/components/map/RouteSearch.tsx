@@ -104,7 +104,7 @@ function PlaceIcon({ icon, size = 20, color = 'currentColor' }: { icon: PlaceIco
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 
 function getResultIcon(category?: string): string {
-  if (!category) return '📍';
+  if (!category || typeof category !== 'string') return '📍';
   const c = category.toLowerCase();
   if (c.includes('fuel') || c.includes('gas') || c.includes('petrol')) return '⛽';
   if (c.includes('restaurant') || c.includes('food') || c.includes('cafe') || c.includes('coffee')) return '🍽️';
@@ -165,7 +165,7 @@ async function searchSuggest(query: string, proximity?: [number, number]): Promi
           mapbox_id: (s.mapbox_id ?? '') as string,
           name: (s.name ?? '') as string,
           address: (s.full_address ?? s.place_formatted ?? s.address ?? '') as string,
-          category: (s.poi_category as string) ?? undefined,
+          category: Array.isArray(s.poi_category) ? (s.poi_category as string[]).join(', ') : (s.poi_category as string) ?? undefined,
         }));
       }
     }
