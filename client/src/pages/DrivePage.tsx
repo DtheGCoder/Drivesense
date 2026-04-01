@@ -697,14 +697,14 @@ export function DrivePage() {
         {isRecording ? (
           <motion.div
             key="recording-hud"
-            className={`absolute bottom-0 left-0 right-0 z-20 ${showRouteSearch ? 'pointer-events-none' : ''}`}
-            style={{ paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
+            className={`absolute bottom-0 left-0 right-0 z-20 flex flex-col ${showRouteSearch ? 'pointer-events-none' : ''}`}
+            style={{ maxHeight: '65vh' }}
             initial={{ opacity: 0, y: 100 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           >
-            <div className="px-4 pb-6 space-y-3 pointer-events-auto">
+            <div className="px-4 pb-2 space-y-3 pointer-events-auto overflow-y-auto flex-1 min-h-0">
               {/* HUD widgets — rendered by order & visibility */}
               {(() => {
                 const visible = [...hudWidgets].filter((w) => w.visible).sort((a, b) => a.order - b.order);
@@ -856,9 +856,11 @@ export function DrivePage() {
                   </>
                 );
               })()}
+            </div>
 
-              {/* Stop Button */}
-              {!showRouteSearch && (
+            {/* Stop Button — always visible at bottom */}
+            {!showRouteSearch && (
+              <div className="px-4 pt-2 pointer-events-auto" style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 8px))' }}>
                 <motion.button
                   className="w-full h-14 rounded-2xl bg-gradient-to-r from-ds-danger to-red-700 text-white font-bold text-base flex items-center justify-center gap-2"
                   whileHover={{ scale: 1.02 }}
@@ -869,8 +871,8 @@ export function DrivePage() {
                   <IconStop size={20} color="white" />
                   Fahrt beenden
                 </motion.button>
-              )}
-            </div>
+              </div>
+            )}
           </motion.div>
         ) : isIdle ? (
           /* Idle State — Start Button */
