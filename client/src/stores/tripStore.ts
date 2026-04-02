@@ -6,6 +6,7 @@ export type TripStatus = 'idle' | 'recording' | 'processing' | 'completed';
 interface TripEvent {
   type: string;
   message: string;
+  details?: string;
   points: number;
   timestamp: number;
 }

@@ -440,75 +440,99 @@ export function DrivePage() {
           const angle = Math.round(curve.totalHeadingChange);
 
           let curveMsg = '';
+          let curveDetails = '';
           let curveType: 'positive' | 'negative' | 'neutral' = 'neutral';
           let curveScore = 0;
+
+          // Factual data for all modes
+          const entrySpd = Math.round(curve.entrySpeed);
+          const minSpd = Math.round(curve.minSpeed);
+          const maxSpd = Math.round(curve.maxSpeed);
+          const maxG = curve.maxLateralG.toFixed(2);
+          const durSec = curveDuration.toFixed(1);
+          const spdDropRound = Math.round(speedDrop);
 
           if (tripMode === 'racing') {
             // Racing: analyze apex technique
             if (speedDrop > 30) {
-              curveMsg = `${dir}kurve (${angle}°): Zu stark abgebremst (${Math.round(speedDrop)} km/h verloren)`;
+              curveMsg = `${dir}kurve (${angle}°): Zu stark abgebremst (${spdDropRound} km/h verloren)`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nTipp: Vor der Kurve früher auf ${minSpd + Math.round(speedDrop * 0.4)} km/h bremsen, dann mit gleichmäßigem Tempo durch die Kurve fahren. Bremsen IN der Kurve destabilisiert das Fahrzeug und kostet Zeit.`;
               curveType = 'negative';
               curveScore = -2;
             } else if (speedDrop < 5 && curve.maxLateralG > 0.4) {
-              curveMsg = `${dir}kurve (${angle}°): Hohes Tempo gehalten, starke Querkraft (${curve.maxLateralG.toFixed(2)}g)`;
+              curveMsg = `${dir}kurve (${angle}°): Hohes Tempo, starke Querkraft (${maxG}g)`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nGut: Tempo gehalten und Kurve mit ${maxG}g Querkraft durchfahren. Grenzbereich gut ausgenutzt.`;
               curveType = 'positive';
               curveScore = 1;
             } else if (speedVariation > 20) {
-              curveMsg = `${dir}kurve (${angle}°): Ungleichmäßige Geschwindigkeit (±${Math.round(speedVariation)} km/h)`;
+              curveMsg = `${dir}kurve (${angle}°): Ungleichmäßiges Tempo (±${Math.round(speedVariation)} km/h)`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h | Min: ${minSpd} km/h | Max: ${maxSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nTipp: Geschwindigkeit VOR der Kurve auf ${minSpd + Math.round(speedVariation * 0.3)} km/h reduzieren und dann konstant halten. Gasstöße in der Kurve führen zu Traktionsverlust und langsameren Rundenzeiten.`;
               curveType = 'negative';
               curveScore = -1;
             } else if (curve.maxLateralG < 0.15 && speedDrop < 15) {
-              curveMsg = `${dir}kurve (${angle}°): Saubere Linie, gute Geschwindigkeit`;
+              curveMsg = `${dir}kurve (${angle}°): Saubere Linie`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nGut: Gleichmäßige Geschwindigkeit und niedrige Querkraft — ideale Linie durch die Kurve.`;
               curveType = 'positive';
               curveScore = 1;
             } else {
               curveMsg = `${dir}kurve (${angle}°): Ordentlich durchfahren`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s`;
               curveType = 'neutral';
             }
           } else if (tripMode === 'eco') {
             // Eco: smooth, gradual, minimal braking
             if (curve.maxLateralG > 0.25) {
-              curveMsg = `${dir}kurve (${angle}°): Zu aggressiv — ${curve.maxLateralG.toFixed(2)}g Querkraft`;
+              curveMsg = `${dir}kurve (${angle}°): Zu aggressiv (${maxG}g)`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nTipp: Geschwindigkeit vor der Kurve auf ca. ${Math.round(curve.entrySpeed * 0.7)} km/h senken. Bei ${maxG}g Querkraft werden die Reifen stark belastet und der Verbrauch steigt deutlich. Ziel: unter 0.15g Querkraft.`;
               curveType = 'negative';
               curveScore = -2;
             } else if (speedDrop > 20) {
-              curveMsg = `${dir}kurve (${angle}°): Zu spät gebremst, ${Math.round(speedDrop)} km/h verloren`;
+              curveMsg = `${dir}kurve (${angle}°): Zu spät gebremst (${spdDropRound} km/h verloren)`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nTipp: Früher vom Gas gehen und die Kurve vorausschauend anfahren. Starkes Bremsen vor Kurven erhöht den Kraftstoffverbrauch, weil danach wieder beschleunigt werden muss.`;
               curveType = 'negative';
               curveScore = -1;
             } else if (speedVariation < 10 && curve.maxLateralG < 0.15) {
               curveMsg = `${dir}kurve (${angle}°): Vorbildlich gleichmäßig`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nPerfekt: Nur ${Math.round(speedVariation)} km/h Geschwindigkeitsunterschied und ${maxG}g Querkraft — sehr verbrauchsarmes Kurvenfahren.`;
               curveType = 'positive';
               curveScore = 1;
             } else {
               curveMsg = `${dir}kurve (${angle}°): Akzeptabel`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s`;
               curveType = 'neutral';
             }
           } else if (tripMode === 'driving_school') {
-            // Driving school: correct procedure — brake before, accelerate after
+            // Driving school: correct procedure
             if (curve.headingRate > avgRate * 1.5) {
               curveMsg = `${dir}kurve (${angle}°): Zu früh eingelenkt`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Lenkrate Eintritt: ${curve.headingRate.toFixed(1)}°/s (Ø ${avgRate.toFixed(1)}°/s)\n\nTipp: Lenk-Einleitung war ${Math.round((curve.headingRate / avgRate - 1) * 100)}% schneller als nötig. Erst am Kurvenscheitel (Apex) den vollen Lenkeinschlag setzen. Zu frühes Einlenken führt zu einem zu engen Radius und erfordert Korrekturen.`;
               curveType = 'negative';
               curveScore = -2;
             } else if (curve.headingRate < avgRate * 0.5 && curve.samples > 3) {
               curveMsg = `${dir}kurve (${angle}°): Zu spät eingelenkt`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Lenkrate Eintritt: ${curve.headingRate.toFixed(1)}°/s (Ø ${avgRate.toFixed(1)}°/s)\n\nTipp: Lenkbewegung früher einleiten. Zu spätes Einlenken führt dazu, dass man in der zweiten Kurvenhälfte stärker lenken muss, was bei Nässe gefährlich werden kann.`;
               curveType = 'negative';
               curveScore = -1;
             } else if (speedDrop > 25) {
-              curveMsg = `${dir}kurve (${angle}°): Zu scharf gebremst in der Kurve`;
+              curveMsg = `${dir}kurve (${angle}°): Zu scharf gebremst (${spdDropRound} km/h)`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nTipp: Geschwindigkeit VOR dem Kurveneingang auf ca. ${minSpd + 5} km/h reduzieren. In der Kurve selbst nur leicht Gas geben (\"Schleppgas\"). Bremsen in der Kurve verringert die Seitenführungskraft der Reifen.`;
               curveType = 'negative';
               curveScore = -2;
             } else if (curve.maxLateralG < 0.2 && speedVariation < 15) {
               curveMsg = `${dir}kurve (${angle}°): Vorbildlich gefahren`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nSehr gut: Kontrollierte Geschwindigkeit, sanftes Einlenken und gleichmäßiger Kurvenverlauf — genau richtig.`;
               curveType = 'positive';
               curveScore = 1;
             } else {
               curveMsg = `${dir}kurve (${angle}°): Durchschnittlich`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s\n\nHinweis: Kurve war in Ordnung, aber achte auf gleichmäßigeres Tempo (Variation: ${Math.round(speedVariation)} km/h).`;
               curveType = 'neutral';
             }
           } else {
-            // Free mode: informational only
-            if (angle > 45) {
-              curveMsg = `${dir}kurve (${angle}°): ${curve.maxLateralG.toFixed(2)}g, ${Math.round(curve.minSpeed)} km/h min`;
+            // Free mode: informational with facts
+            if (angle > 30) {
+              curveMsg = `${dir}kurve (${angle}°): ${maxG}g, ${minSpd} km/h min`;
+              curveDetails = `Eingangsgeschwindigkeit: ${entrySpd} km/h → Minimum: ${minSpd} km/h → Ausgang: ${maxSpd} km/h\nQuerkraft: max. ${maxG}g | Dauer: ${durSec}s | Geschwindigkeitsverlust: ${spdDropRound} km/h`;
               curveType = 'neutral';
             }
           }
@@ -521,6 +545,7 @@ export function DrivePage() {
             const curveEvent: TripEvent = {
               type: curveType,
               message: curveMsg,
+              details: curveDetails || undefined,
               points: curveScore,
               timestamp: position.timestamp,
             };

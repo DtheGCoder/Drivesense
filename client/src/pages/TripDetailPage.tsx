@@ -42,6 +42,7 @@ function recordToDetail(r: TripRecord) {
       return {
         time: `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`,
         message: e.message,
+        details: e.details,
         points: e.points,
         type: e.type,
       };
@@ -95,34 +96,43 @@ function ScoreBar({ label, value, icon, delay }: { label: string; value: number;
 
 // ─── Event List Item ─────────────────────────────────────────────────────────
 
-function EventItem({ event, index }: { event: { time: string; message: string; points: number; type: 'positive' | 'negative' | 'neutral' }; index: number }) {
+function EventItem({ event, index }: { event: { time: string; message: string; details?: string; points: number; type: 'positive' | 'negative' | 'neutral' }; index: number }) {
   const isPositive = event.type === 'positive';
+  const isNeutral = event.type === 'neutral';
+  const dotColor = isPositive ? 'rgba(34,197,94,0.15)' : isNeutral ? 'rgba(255,255,255,0.08)' : 'rgba(239,68,68,0.15)';
+  const textColor = isPositive ? 'var(--color-ds-success)' : isNeutral ? 'var(--color-ds-text-muted)' : 'var(--color-ds-danger)';
   return (
     <motion.div
-      className="flex items-center gap-3 py-2.5 border-b border-white/5 last:border-0"
+      className="py-2.5 border-b border-white/5 last:border-0"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.04, duration: 0.25 }}
     >
-      <div
-        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-        style={{
-          backgroundColor: isPositive ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-          color: isPositive ? 'var(--color-ds-success)' : 'var(--color-ds-danger)',
-        }}
-      >
-        {isPositive ? '+' : '−'}
+      <div className="flex items-center gap-3">
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+          style={{ backgroundColor: dotColor, color: textColor }}
+        >
+          {isPositive ? '+' : isNeutral ? '○' : '−'}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm">{event.message}</p>
+          <p className="text-xs text-white/30">{event.time} Uhr</p>
+        </div>
+        {event.points !== 0 && (
+          <span
+            className="text-sm font-semibold flex-shrink-0"
+            style={{ color: textColor }}
+          >
+            {isPositive ? '+' : ''}{event.points}
+          </span>
+        )}
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm">{event.message}</p>
-        <p className="text-xs text-white/30">{event.time} Uhr</p>
-      </div>
-      <span
-        className="text-sm font-semibold flex-shrink-0"
-        style={{ color: isPositive ? 'var(--color-ds-success)' : 'var(--color-ds-danger)' }}
-      >
-        {isPositive ? '+' : ''}{event.points}
-      </span>
+      {event.details && (
+        <div className="ml-11 mt-1.5 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+          <p className="text-xs text-white/50 leading-relaxed whitespace-pre-line">{event.details}</p>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -33,6 +33,7 @@ export interface TripRecord {
 export interface TripEvent {
   type: 'positive' | 'negative' | 'neutral';
   message: string;
+  details?: string;
   points: number;
   timestamp: number;
 }
