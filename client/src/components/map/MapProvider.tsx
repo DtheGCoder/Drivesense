@@ -49,7 +49,7 @@ interface MapContextValue {
   loaded: boolean;
   hasToken: boolean;
   flyTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => void;
-  easeTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => void;
+  easeTo: (opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number; padding?: { top?: number; bottom?: number; left?: number; right?: number } }) => void;
   drawRoute: (coordinates: [number, number][]) => void;
   clearRoute: () => void;
   drawAlternativeRoutes: (routes: [number, number][][]) => void;
@@ -278,7 +278,7 @@ export function MapProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const easeTo = useCallback((opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number }) => {
+  const easeTo = useCallback((opts: { center?: [number, number]; zoom?: number; pitch?: number; bearing?: number; duration?: number; padding?: { top?: number; bottom?: number; left?: number; right?: number } }) => {
     singletonMap?.easeTo({
       ...opts,
       essential: true,

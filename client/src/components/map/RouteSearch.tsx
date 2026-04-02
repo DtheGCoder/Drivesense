@@ -772,6 +772,9 @@ export function RouteSearch({ isOpen, onClose, onSpeedLimit }: RouteSearchProps)
     const speed = gpsPosition.speed ?? 0;
     const speedKmh = speed * 3.6;
 
+    // Offset user position to lower 1/3 of screen so more route ahead is visible
+    const navPadding = { top: 0, bottom: 300, left: 0, right: 0 };
+
     if (speedKmh > 5 && rawHeading != null) {
       const prev = smoothNavBearingRef.current;
       let diff = rawHeading - prev;
@@ -789,12 +792,12 @@ export function RouteSearch({ isOpen, onClose, onSpeedLimit }: RouteSearchProps)
 
       if (bearingDiff > 8 || elapsed > 3000) {
         lastNavBearingUpdateRef.current = now;
-        easeTo({ center: userPos, zoom: 17, pitch: 60, bearing: smoothed, duration: 1000 });
+        easeTo({ center: userPos, zoom: 17, pitch: 60, bearing: smoothed, duration: 1000, padding: navPadding });
       } else {
-        easeTo({ center: userPos, duration: 800 });
+        easeTo({ center: userPos, duration: 800, padding: navPadding });
       }
     } else {
-      easeTo({ center: userPos, zoom: 17, pitch: 60, duration: 800 });
+      easeTo({ center: userPos, zoom: 17, pitch: 60, duration: 800, padding: navPadding });
     }
   }, [view, gpsPosition, routeInfo, currentStepIndex, easeTo, isRerouting, endPoint, fetchRoute, drawRoute, onSpeedLimit]);
 

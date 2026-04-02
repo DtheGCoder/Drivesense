@@ -84,32 +84,77 @@ function saveToStorage(profile: UserProfile) {
 // ─── Fuel Calculation ────────────────────────────────────────────────────────
 
 /**
- * Estimate fuel consumption based on speed profile.
- * - City driving (<50 km/h): uses city consumption
- * - Highway (>100 km/h): uses highway consumption
- * - Mixed: linear interpolation
- * - Speed factor: higher speed = exponentially more fuel
+ * Estimate fuel consumption (L/100km) based on instantaneous speed.
+ * Uses a realistic model:
+ * - Idling (<5 km/h): ~1.5 L/h baseline
+ * - City (<50): city consumption + stop-and-go penalty
+ * - Mixed (50-100): linear interpolation city→highway
+ * - Highway (100-130): highway consumption
+ * - High speed (>130): quadratic aerodynamic drag increase
+ * - Accounts for vehicle weight via horsePower/weight ratio
  */
-function estimateConsumption(car: CarProfile, avgSpeedKmh: number): number {
-  // Base consumption interpolation (L/100km)
-  let base: number;
-  if (avgSpeedKmh <= 50) {
-    base = car.consumptionCity;
-  } else if (avgSpeedKmh >= 100) {
-    base = car.consumptionHighway;
-  } else {
-    const t = (avgSpeedKmh - 50) / 50;
-    base = car.consumptionCity * (1 - t) + car.consumptionMixed * t;
+function estimateConsumption(car: CarProfile, speedKmh: number): number {
+  // Idling
+  if (speedKmh < 5) {
+    // Idling consumption: ~0.8-1.5 L/h → convert to L/100km equivalent
+    // At 0 km/h it's infinite L/100km, so return a fixed idle rate
+    return car.consumptionCity * 1.3; // slightly above city
   }
 
-  // Speed correction factor (aerodynamic drag increases quadratically)
-  // At 130+ km/h, consumption rises significantly
-  if (avgSpeedKmh > 100) {
-    const overSpeed = avgSpeedKmh - 100;
-    base *= 1 + (overSpeed * overSpeed) / 5000;
+  let base: number;
+  if (speedKmh <= 30) {
+    // Heavy city: stop-and-go, lots of acceleration
+    base = car.consumptionCity * 1.15;
+  } else if (speedKmh <= 50) {
+    // Normal city
+    const t = (speedKmh - 30) / 20;
+    base = car.consumptionCity * (1.15 * (1 - t) + 1.0 * t);
+  } else if (speedKmh <= 80) {
+    // City→mixed transition (sweet spot around 60-80 for most cars)
+    const t = (speedKmh - 50) / 30;
+    base = car.consumptionCity * (1 - t) + car.consumptionMixed * t;
+    // Efficiency bonus in the 60-80 range
+    base *= 0.95;
+  } else if (speedKmh <= 100) {
+    // Mixed→highway
+    const t = (speedKmh - 80) / 20;
+    base = car.consumptionMixed * (1 - t) + car.consumptionHighway * t;
+  } else if (speedKmh <= 130) {
+    // Highway
+    base = car.consumptionHighway;
+    // Mild aerodynamic increase
+    const over = speedKmh - 100;
+    base *= 1 + (over * over) / 8000;
+  } else {
+    // High speed — quadratic aerodynamic drag
+    base = car.consumptionHighway;
+    const over = speedKmh - 100;
+    base *= 1 + (over * over) / 4000;
   }
 
   return base;
+}
+
+/**
+ * Estimate fuel used for a single segment of driving.
+ * @param car - Vehicle profile
+ * @param speedKmh - Speed during this segment
+ * @param distanceM - Distance of segment in meters
+ * @param gForce - Absolute g-force (acceleration intensity increases consumption)
+ * @returns Liters consumed for this segment
+ */
+export function estimateSegmentFuel(car: CarProfile, speedKmh: number, distanceM: number, gForce: number): number {
+  const consumptionPer100 = estimateConsumption(car, speedKmh);
+  const distanceKm = distanceM / 1000;
+  let liters = (consumptionPer100 / 100) * distanceKm;
+
+  // Acceleration penalty: hard acceleration burns more fuel
+  // Each 0.1g of acceleration adds ~5% fuel consumption
+  if (gForce > 0.05) {
+    liters *= 1 + gForce * 0.5;
+  }
+
+  return liters;
 }
 
 // Sync profile to server (fire-and-forget)

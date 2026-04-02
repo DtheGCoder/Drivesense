@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { IconModeSchool, IconModeRacing, IconModeEco, IconModeFree, IconChevronRight, IconChevronLeft, IconStop, IconPlay } from '@/components/ui/Icons';
 import { useTripStore, type TripMode } from '@/stores/tripStore';
 import { useTripHistoryStore, type TripRecord, type TripEvent } from '@/stores/tripHistoryStore';
-import { useProfileStore } from '@/stores/profileStore';
+import { useProfileStore, estimateSegmentFuel } from '@/stores/profileStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useGeolocation, type GeoPosition, getPermissionHint } from '@/hooks/useGeolocation';
 import { useHudStore } from '@/stores/hudStore';
@@ -230,6 +230,25 @@ export function DrivePage() {
   const maxGForceRef = useRef<number>(0);
   const scoreRef = useRef<number>(100);
   const speedSamplesRef = useRef<number[]>([]);
+  const fuelUsedRef = useRef<number>(0);
+  const brakingScoreRef = useRef<{ penalties: number; count: number }>({ penalties: 0, count: 0 });
+  const accelScoreRef = useRef<{ penalties: number; count: number }>({ penalties: 0, count: 0 });
+  const corneringScoreRef = useRef<{ penalties: number; count: number }>({ penalties: 0, count: 0 });
+  const smoothCount = useRef<number>(0);
+  const totalSamples = useRef<number>(0);
+  // Curve tracking for analysis
+  const curveRef = useRef<{
+    active: boolean;
+    direction: 'left' | 'right';
+    totalHeadingChange: number;
+    entrySpeed: number;
+    minSpeed: number;
+    maxSpeed: number;
+    maxLateralG: number;
+    samples: number;
+    entryTimestamp: number;
+    headingRate: number; // degrees/sec at entry
+  } | null>(null);
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
 
   // Smooth heading filter — prevents jerky map rotation
@@ -312,6 +331,21 @@ export function DrivePage() {
     return () => clearInterval(interval);
   }, [isRecording, tripStartedAt]);
 
+  // Persist tracking across tab switches / background
+  // When the page is hidden, browsers may throttle or stop GPS watchers.
+  // On return, we re-start the watcher without resetting the trip state.
+  useEffect(() => {
+    if (!isRecording) return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Re-start GPS watcher — uses the same hook so it keeps the same position state
+        startTracking();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isRecording, startTracking]);
+
   // GPS status messages
   useEffect(() => {
     if (gpsStatus === 'error_denied') {
@@ -338,53 +372,234 @@ export function DrivePage() {
     // Track max speed
     if (speedKmh > maxSpeedRef.current) maxSpeedRef.current = speedKmh;
 
-    // Calculate g-force from speed changes
-    const prevSpeed = prevSpeedRef.current;
+    // Calculate time delta — guard against stale data from tab switch / background
     const timeDelta = prevPositionRef.current
       ? (position.timestamp - prevPositionRef.current.timestamp) / 1000
       : 1;
-    const speedChange = (speedKmh - prevSpeed) / 3.6; // m/s
-    const gLongitudinal = timeDelta > 0 ? speedChange / (timeDelta * 9.81) : 0;
+    const isStaleGap = timeDelta > 5; // >5s gap = came back from background, skip g-force
 
-    // Lateral g-force estimation from heading change
+    // Calculate g-force from speed changes (skip if stale gap)
+    const prevSpeed = prevSpeedRef.current;
+    let gLongitudinal = 0;
     let gLateral = 0;
-    if (prevPositionRef.current?.heading !== null && position.heading !== null && prevPositionRef.current) {
-      const headingDelta = Math.abs(position.heading - (prevPositionRef.current.heading ?? 0));
-      const normalizedDelta = headingDelta > 180 ? 360 - headingDelta : headingDelta;
-      gLateral = (normalizedDelta / Math.max(timeDelta, 0.5)) * (speedKmh / 3.6) / (9.81 * 50);
+    if (!isStaleGap) {
+      const speedChange = (speedKmh - prevSpeed) / 3.6; // m/s
+      gLongitudinal = timeDelta > 0 ? speedChange / (timeDelta * 9.81) : 0;
+
+      // Lateral g-force estimation from heading change
+      if (prevPositionRef.current?.heading !== null && position.heading !== null && prevPositionRef.current) {
+        const headingDelta = Math.abs(position.heading - (prevPositionRef.current.heading ?? 0));
+        const normalizedDelta = headingDelta > 180 ? 360 - headingDelta : headingDelta;
+        gLateral = (normalizedDelta / Math.max(timeDelta, 0.5)) * (speedKmh / 3.6) / (9.81 * 50);
+      }
     }
 
     const totalG = Math.sqrt(gLateral ** 2 + gLongitudinal ** 2);
     if (totalG > maxGForceRef.current) maxGForceRef.current = totalG;
 
+    // Curve detection from heading changes
+    if (!isStaleGap && prevPositionRef.current?.heading != null && position.heading != null && speedKmh > 10) {
+      let hDelta = position.heading - (prevPositionRef.current.heading ?? 0);
+      if (hDelta > 180) hDelta -= 360;
+      if (hDelta < -180) hDelta += 360;
+      const headingRate = Math.abs(hDelta) / Math.max(timeDelta, 0.3);
+      const direction: 'left' | 'right' = hDelta < 0 ? 'left' : 'right';
+
+      const curve = curveRef.current;
+      if (headingRate > 3) { // >3°/s = in a curve
+        if (!curve) {
+          // Start new curve
+          curveRef.current = {
+            active: true,
+            direction,
+            totalHeadingChange: Math.abs(hDelta),
+            entrySpeed: speedKmh,
+            minSpeed: speedKmh,
+            maxSpeed: speedKmh,
+            maxLateralG: Math.abs(gLateral),
+            samples: 1,
+            entryTimestamp: position.timestamp,
+            headingRate,
+          };
+        } else {
+          // Continue curve
+          curve.totalHeadingChange += Math.abs(hDelta);
+          curve.minSpeed = Math.min(curve.minSpeed, speedKmh);
+          curve.maxSpeed = Math.max(curve.maxSpeed, speedKmh);
+          curve.maxLateralG = Math.max(curve.maxLateralG, Math.abs(gLateral));
+          curve.samples++;
+        }
+      } else if (curve && curve.active) {
+        // Curve ended — generate analysis if significant (>15° total turn)
+        if (curve.totalHeadingChange > 15 && curve.samples >= 3) {
+          const speedDrop = curve.entrySpeed - curve.minSpeed;
+          const speedVariation = curve.maxSpeed - curve.minSpeed;
+          const curveDuration = (position.timestamp - curve.entryTimestamp) / 1000;
+          const avgRate = curve.totalHeadingChange / curveDuration;
+          const dir = curve.direction === 'left' ? 'Links' : 'Rechts';
+          const angle = Math.round(curve.totalHeadingChange);
+
+          let curveMsg = '';
+          let curveType: 'positive' | 'negative' | 'neutral' = 'neutral';
+          let curveScore = 0;
+
+          if (tripMode === 'racing') {
+            // Racing: analyze apex technique
+            if (speedDrop > 30) {
+              curveMsg = `${dir}kurve (${angle}°): Zu stark abgebremst (${Math.round(speedDrop)} km/h verloren)`;
+              curveType = 'negative';
+              curveScore = -2;
+            } else if (speedDrop < 5 && curve.maxLateralG > 0.4) {
+              curveMsg = `${dir}kurve (${angle}°): Hohes Tempo gehalten, starke Querkraft (${curve.maxLateralG.toFixed(2)}g)`;
+              curveType = 'positive';
+              curveScore = 1;
+            } else if (speedVariation > 20) {
+              curveMsg = `${dir}kurve (${angle}°): Ungleichmäßige Geschwindigkeit (±${Math.round(speedVariation)} km/h)`;
+              curveType = 'negative';
+              curveScore = -1;
+            } else if (curve.maxLateralG < 0.15 && speedDrop < 15) {
+              curveMsg = `${dir}kurve (${angle}°): Saubere Linie, gute Geschwindigkeit`;
+              curveType = 'positive';
+              curveScore = 1;
+            } else {
+              curveMsg = `${dir}kurve (${angle}°): Ordentlich durchfahren`;
+              curveType = 'neutral';
+            }
+          } else if (tripMode === 'eco') {
+            // Eco: smooth, gradual, minimal braking
+            if (curve.maxLateralG > 0.25) {
+              curveMsg = `${dir}kurve (${angle}°): Zu aggressiv — ${curve.maxLateralG.toFixed(2)}g Querkraft`;
+              curveType = 'negative';
+              curveScore = -2;
+            } else if (speedDrop > 20) {
+              curveMsg = `${dir}kurve (${angle}°): Zu spät gebremst, ${Math.round(speedDrop)} km/h verloren`;
+              curveType = 'negative';
+              curveScore = -1;
+            } else if (speedVariation < 10 && curve.maxLateralG < 0.15) {
+              curveMsg = `${dir}kurve (${angle}°): Vorbildlich gleichmäßig`;
+              curveType = 'positive';
+              curveScore = 1;
+            } else {
+              curveMsg = `${dir}kurve (${angle}°): Akzeptabel`;
+              curveType = 'neutral';
+            }
+          } else if (tripMode === 'driving_school') {
+            // Driving school: correct procedure — brake before, accelerate after
+            if (curve.headingRate > avgRate * 1.5) {
+              curveMsg = `${dir}kurve (${angle}°): Zu früh eingelenkt`;
+              curveType = 'negative';
+              curveScore = -2;
+            } else if (curve.headingRate < avgRate * 0.5 && curve.samples > 3) {
+              curveMsg = `${dir}kurve (${angle}°): Zu spät eingelenkt`;
+              curveType = 'negative';
+              curveScore = -1;
+            } else if (speedDrop > 25) {
+              curveMsg = `${dir}kurve (${angle}°): Zu scharf gebremst in der Kurve`;
+              curveType = 'negative';
+              curveScore = -2;
+            } else if (curve.maxLateralG < 0.2 && speedVariation < 15) {
+              curveMsg = `${dir}kurve (${angle}°): Vorbildlich gefahren`;
+              curveType = 'positive';
+              curveScore = 1;
+            } else {
+              curveMsg = `${dir}kurve (${angle}°): Durchschnittlich`;
+              curveType = 'neutral';
+            }
+          } else {
+            // Free mode: informational only
+            if (angle > 45) {
+              curveMsg = `${dir}kurve (${angle}°): ${curve.maxLateralG.toFixed(2)}g, ${Math.round(curve.minSpeed)} km/h min`;
+              curveType = 'neutral';
+            }
+          }
+
+          if (curveMsg) {
+            if (curveScore !== 0) {
+              scoreRef.current = Math.max(0, Math.min(100, scoreRef.current + curveScore));
+              if (curveScore < 0) corneringScoreRef.current.penalties += Math.abs(curveScore);
+            }
+            const curveEvent: TripEvent = {
+              type: curveType,
+              message: curveMsg,
+              points: curveScore,
+              timestamp: position.timestamp,
+            };
+            tripEventsRef.current.push(curveEvent);
+            const cid = crypto.randomUUID();
+            setVisibleEvents((prev) => [...prev.slice(-2), { id: cid, message: curveMsg, points: curveScore, type: curveType }]);
+          }
+        }
+        curveRef.current = null;
+      }
+    } else if (isStaleGap) {
+      curveRef.current = null; // Reset curve state after background gap
+    }
+
     // Calculate distance from previous point
     if (prevPositionRef.current) {
       const prevPoint: [number, number] = [prevPositionRef.current.lng, prevPositionRef.current.lat];
       const dist = haversineDistance(prevPoint, currentPoint);
-      if (dist > 2 && dist < 500) {
+      // Accept larger jumps after background gaps (could have driven far)
+      const maxDist = isStaleGap ? 5000 : 500;
+      if (dist > 2 && dist < maxDist) {
         store.updateDistance(store.distance + dist);
+
+        // Accumulate fuel per GPS sample using instantaneous speed
+        const car = useProfileStore.getState().getSelectedCar();
+        if (car) {
+          fuelUsedRef.current += estimateSegmentFuel(car, speedKmh, dist, totalG);
+        }
       }
     }
+    totalSamples.current++;
 
-    // Score evaluation based on driving behavior
+    // Score evaluation based on driving behavior (skip if stale gap)
+    // Mode-specific thresholds
+    const modeThresholds = {
+      eco: { hardBrake: 0.25, medBrake: 0.15, sharpTurn: 0.2, smoothMax: 0.08, hardPenalty: -5, medPenalty: -2, turnPenalty: -3, smoothBonus: 0.8 },
+      racing: { hardBrake: 0.6, medBrake: 0.45, sharpTurn: 0.5, smoothMax: 0.15, hardPenalty: -2, medPenalty: -1, turnPenalty: -1, smoothBonus: 0.3 },
+      driving_school: { hardBrake: 0.35, medBrake: 0.2, sharpTurn: 0.25, smoothMax: 0.1, hardPenalty: -4, medPenalty: -2, turnPenalty: -3, smoothBonus: 0.6 },
+      free: { hardBrake: 0.4, medBrake: 0.25, sharpTurn: 0.3, smoothMax: 0.1, hardPenalty: -3, medPenalty: -1, turnPenalty: -2, smoothBonus: 0.5 },
+    };
+    const th = modeThresholds[tripMode] || modeThresholds.free;
+
     let scoreChange = 0;
     let eventMessage = '';
     let eventType: 'positive' | 'negative' | 'neutral' = 'neutral';
 
-    if (Math.abs(gLongitudinal) > 0.4) {
-      scoreChange = -3;
-      eventMessage = gLongitudinal < 0 ? 'Harte Bremsung!' : 'Zu starke Beschleunigung!';
+    if (!isStaleGap && Math.abs(gLongitudinal) > th.hardBrake) {
+      scoreChange = th.hardPenalty;
+      if (gLongitudinal < 0) {
+        brakingScoreRef.current.penalties += Math.abs(th.hardPenalty);
+        brakingScoreRef.current.count++;
+        eventMessage = 'Harte Bremsung!';
+      } else {
+        accelScoreRef.current.penalties += Math.abs(th.hardPenalty);
+        accelScoreRef.current.count++;
+        eventMessage = 'Zu starke Beschleunigung!';
+      }
       eventType = 'negative';
-    } else if (Math.abs(gLongitudinal) > 0.25) {
-      scoreChange = -1;
-      eventMessage = gLongitudinal < 0 ? 'Etwas zu scharf gebremst' : 'Zügige Beschleunigung';
+    } else if (!isStaleGap && Math.abs(gLongitudinal) > th.medBrake) {
+      scoreChange = th.medPenalty;
+      if (gLongitudinal < 0) {
+        brakingScoreRef.current.penalties += Math.abs(th.medPenalty);
+        brakingScoreRef.current.count++;
+        eventMessage = 'Etwas zu scharf gebremst';
+      } else {
+        accelScoreRef.current.penalties += Math.abs(th.medPenalty);
+        accelScoreRef.current.count++;
+        eventMessage = 'Zügige Beschleunigung';
+      }
       eventType = 'negative';
-    } else if (Math.abs(gLateral) > 0.3) {
-      scoreChange = -2;
+    } else if (!isStaleGap && Math.abs(gLateral) > th.sharpTurn) {
+      scoreChange = th.turnPenalty;
+      corneringScoreRef.current.penalties += Math.abs(th.turnPenalty);
+      corneringScoreRef.current.count++;
       eventMessage = 'Scharfes Lenken!';
       eventType = 'negative';
-    } else if (speedKmh > 2 && Math.abs(gLongitudinal) < 0.1 && Math.abs(gLateral) < 0.1) {
-      scoreChange = 0.5;
+    } else if (!isStaleGap && speedKmh > 2 && Math.abs(gLongitudinal) < th.smoothMax && Math.abs(gLateral) < th.smoothMax) {
+      scoreChange = th.smoothBonus;
+      smoothCount.current++;
       if (Math.random() < 0.15) {
         eventMessage = 'Gleichmäßige Fahrt';
         eventType = 'positive';
@@ -422,6 +637,8 @@ export function DrivePage() {
 
     // Follow user on map with smooth heading rotation
     const rawHeading = position.heading ?? 0;
+    // Offset user to lower 1/3 of screen for better forward visibility
+    const drivePadding = { top: 0, bottom: 250, left: 0, right: 0 };
     if (speedKmh > 5 && rawHeading !== null) {
       // Smooth the heading with exponential moving average
       const prev = smoothBearingRef.current;
@@ -439,13 +656,13 @@ export function DrivePage() {
       if (bearingDiff > HEADING_THRESHOLD || now - lastBearingUpdateRef.current > 3000) {
         smoothBearingRef.current = normalizedBearing;
         lastBearingUpdateRef.current = now;
-        easeTo({ center: [position.lng, position.lat], bearing: normalizedBearing, pitch: 60, zoom: 17, duration: 1000 });
+        easeTo({ center: [position.lng, position.lat], bearing: normalizedBearing, pitch: 60, zoom: 17, duration: 1000, padding: drivePadding });
       } else {
         smoothBearingRef.current = normalizedBearing;
-        easeTo({ center: [position.lng, position.lat], duration: 800 });
+        easeTo({ center: [position.lng, position.lat], duration: 800, padding: drivePadding });
       }
     } else {
-      easeTo({ center: [position.lng, position.lat], duration: 800 });
+      easeTo({ center: [position.lng, position.lat], duration: 800, padding: drivePadding });
     }
 
     // Draw breadcrumb trail
@@ -478,6 +695,13 @@ export function DrivePage() {
     maxGForceRef.current = 0;
     scoreRef.current = 100;
     speedSamplesRef.current = [];
+    fuelUsedRef.current = 0;
+    brakingScoreRef.current = { penalties: 0, count: 0 };
+    accelScoreRef.current = { penalties: 0, count: 0 };
+    corneringScoreRef.current = { penalties: 0, count: 0 };
+    smoothCount.current = 0;
+    totalSamples.current = 0;
+    curveRef.current = null;
     smoothBearingRef.current = 0;
     lastBearingUpdateRef.current = 0;
 
@@ -500,7 +724,37 @@ export function DrivePage() {
       : 0;
 
     const durationSec = Math.round(store.elapsed / 1000);
-    const fuel = calculateFuelCost(store.distance, avgSpeed);
+
+    // Fuel: use per-sample accumulated fuel, or fallback to estimate
+    const accumulatedFuel = fuelUsedRef.current;
+    const fuel = accumulatedFuel > 0
+      ? (() => {
+          const profile = useProfileStore.getState().profile;
+          const car = useProfileStore.getState().getSelectedCar();
+          if (!car || !profile) return null;
+          let pricePerUnit: number;
+          switch (car.fuelType) {
+            case 'benzin': pricePerUnit = profile.fuelPriceBenzin; break;
+            case 'diesel': pricePerUnit = profile.fuelPriceDiesel; break;
+            case 'elektro': pricePerUnit = profile.fuelPriceElektro; break;
+            case 'hybrid': pricePerUnit = profile.fuelPriceBenzin; break;
+          }
+          return {
+            liters: Math.round(accumulatedFuel * 100) / 100,
+            cost: Math.round(accumulatedFuel * pricePerUnit * 100) / 100,
+          };
+        })()
+      : calculateFuelCost(store.distance, avgSpeed);
+
+    // Compute per-category scores from actual tracking data
+    const total = totalSamples.current || 1;
+    const smoothRatio = smoothCount.current / total;
+    const brakingScore = Math.max(0, Math.min(100, 100 - brakingScoreRef.current.penalties * 2));
+    const accelScore = Math.max(0, Math.min(100, 100 - accelScoreRef.current.penalties * 2));
+    const corneringScore = Math.max(0, Math.min(100, 100 - corneringScoreRef.current.penalties * 2));
+    const consistencyScore = Math.max(0, Math.min(100, Math.round(smoothRatio * 100)));
+    // Speed score: based on how often the driver was within reasonable limits
+    const speedScore = Math.max(0, Math.min(100, Math.round(scoreRef.current * 0.9 + smoothRatio * 10)));
 
     // Save trip to history
     const tripRecord: TripRecord = {
@@ -519,11 +773,11 @@ export function DrivePage() {
       endAddress: 'GPS-Ziel',
       route: routePointsRef.current,
       scores: {
-        braking: Math.round(85 + (scoreRef.current - 85) * 0.8 + Math.random() * 10 - 5),
-        acceleration: Math.round(85 + (scoreRef.current - 85) * 0.7 + Math.random() * 10 - 5),
-        cornering: Math.round(85 + (scoreRef.current - 85) * 0.9 + Math.random() * 10 - 5),
-        speed: Math.round(85 + (scoreRef.current - 85) * 0.6 + Math.random() * 10 - 5),
-        consistency: Math.round(85 + (scoreRef.current - 85) * 0.75 + Math.random() * 10 - 5),
+        braking: Math.round(brakingScore),
+        acceleration: Math.round(accelScore),
+        cornering: Math.round(corneringScore),
+        speed: Math.round(speedScore),
+        consistency: Math.round(consistencyScore),
       },
       events: tripEventsRef.current,
       fuelUsed: fuel?.liters,
@@ -743,7 +997,25 @@ export function DrivePage() {
               {(() => {
                 const visible = [...hudWidgets].filter((w) => w.visible).sort((a, b) => a.order - b.order);
                 const compact = showRouteSearch; // compact mode when navigation overlay active
-                const fuel = calculateFuelCost(tripDistance, tripMetrics.speed * 0.7);
+                // Use per-sample accumulated fuel if available, otherwise fallback to estimate
+                const fuel = fuelUsedRef.current > 0
+                  ? (() => {
+                      const profile = useProfileStore.getState().profile;
+                      const car = useProfileStore.getState().getSelectedCar();
+                      if (!car || !profile) return null;
+                      let pricePerUnit: number;
+                      switch (car.fuelType) {
+                        case 'benzin': pricePerUnit = profile.fuelPriceBenzin; break;
+                        case 'diesel': pricePerUnit = profile.fuelPriceDiesel; break;
+                        case 'elektro': pricePerUnit = profile.fuelPriceElektro; break;
+                        case 'hybrid': pricePerUnit = profile.fuelPriceBenzin; break;
+                      }
+                      return {
+                        liters: Math.round(fuelUsedRef.current * 100) / 100,
+                        cost: Math.round(fuelUsedRef.current * pricePerUnit * 100) / 100,
+                      };
+                    })()
+                  : calculateFuelCost(tripDistance, tripMetrics.speed * 0.7);
 
                 return (
                   <>

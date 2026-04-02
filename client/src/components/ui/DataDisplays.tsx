@@ -115,52 +115,74 @@ interface GForceIndicatorProps {
 
 export function GForceIndicator({ lateral, longitudinal, size = 100, maxG = 1.5 }: GForceIndicatorProps) {
   const center = size / 2;
-  const maxOffset = (size / 2) - 12;
-  const x = center + (lateral / maxG) * maxOffset;
-  const y = center - (longitudinal / maxG) * maxOffset;
+  const maxOffset = (size / 2) - 14;
+  const clampedLat = Math.max(-maxG, Math.min(maxG, lateral));
+  const clampedLong = Math.max(-maxG, Math.min(maxG, longitudinal));
+  const x = center + (clampedLat / maxG) * maxOffset;
+  const y = center - (clampedLong / maxG) * maxOffset;
   const totalG = Math.sqrt(lateral * lateral + longitudinal * longitudinal);
   const intensity = Math.min(totalG / maxG, 1);
+
+  // Direction-based color: braking=red, accel=green, lateral=cyan/yellow
+  const getDotColor = () => {
+    if (Math.abs(longitudinal) > Math.abs(lateral)) {
+      return longitudinal < 0 ? 'rgba(255, 51, 85, ALPHA)' : 'rgba(34, 197, 94, ALPHA)';
+    }
+    return lateral > 0 ? 'rgba(251, 191, 36, ALPHA)' : 'rgba(0, 240, 255, ALPHA)';
+  };
+  const dotFill = getDotColor().replace('ALPHA', `${0.4 + intensity * 0.6}`);
+  const dotStroke = getDotColor().replace('ALPHA', '1');
+  const dotGlow = getDotColor().replace('ALPHA', '0.6');
+
+  // G-Force value display
+  const gText = totalG.toFixed(2);
 
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size}>
-        {/* Grid circles */}
-        {[0.33, 0.66, 1].map((r) => (
-          <circle
-            key={r}
-            cx={center}
-            cy={center}
-            r={maxOffset * r}
-            fill="none"
-            stroke="var(--color-ds-border)"
-            strokeWidth="1"
-            opacity={0.4}
-          />
-        ))}
-        {/* Crosshair */}
-        <line x1={center} y1={4} x2={center} y2={size - 4} stroke="var(--color-ds-border)" strokeWidth="1" opacity={0.3} />
-        <line x1={4} y1={center} x2={size - 4} y2={center} stroke="var(--color-ds-border)" strokeWidth="1" opacity={0.3} />
+        {/* Grid circles with zone colors */}
+        <circle cx={center} cy={center} r={maxOffset * 0.33} fill="none" stroke="rgba(34,197,94,0.15)" strokeWidth="1" />
+        <circle cx={center} cy={center} r={maxOffset * 0.66} fill="none" stroke="rgba(251,191,36,0.12)" strokeWidth="1" />
+        <circle cx={center} cy={center} r={maxOffset} fill="none" stroke="rgba(255,51,85,0.12)" strokeWidth="1" />
 
-        {/* G-Force dot */}
+        {/* Crosshair */}
+        <line x1={center} y1={6} x2={center} y2={size - 6} stroke="var(--color-ds-border)" strokeWidth="0.5" opacity={0.3} />
+        <line x1={6} y1={center} x2={size - 6} y2={center} stroke="var(--color-ds-border)" strokeWidth="0.5" opacity={0.3} />
+
+        {/* Direction line from center to dot */}
+        {totalG > 0.05 && (
+          <line
+            x1={center} y1={center} x2={x} y2={y}
+            stroke={dotStroke}
+            strokeWidth="1.5"
+            opacity={0.3}
+            strokeLinecap="round"
+          />
+        )}
+
+        {/* G-Force dot with glow */}
         <motion.circle
-          cx={x}
-          cy={y}
-          r={8}
-          fill={`rgba(0, 240, 255, ${0.3 + intensity * 0.7})`}
-          stroke="var(--color-ds-primary)"
+          r={10}
+          fill={dotFill}
+          stroke={dotStroke}
           strokeWidth="2"
           animate={{ cx: x, cy: y }}
-          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-          style={{
-            filter: `drop-shadow(0 0 ${6 + intensity * 12}px var(--color-ds-primary))`,
-          }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25, mass: 0.5 }}
+          style={{ filter: `drop-shadow(0 0 ${4 + intensity * 10}px ${dotGlow})` }}
         />
+
+        {/* Center dot */}
+        <circle cx={center} cy={center} r={2} fill="var(--color-ds-border)" opacity={0.5} />
       </svg>
-      {/* Labels */}
-      <span className="absolute top-0.5 left-1/2 -translate-x-1/2 text-[8px] text-ds-text-muted">BRK</span>
-      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] text-ds-text-muted">ACC</span>
-      <span className="absolute left-0.5 top-1/2 -translate-y-1/2 text-[8px] text-ds-text-muted">L</span>
-      <span className="absolute right-0.5 top-1/2 -translate-y-1/2 text-[8px] text-ds-text-muted">R</span>
+
+      {/* Direction labels */}
+      <span className="absolute top-0 left-1/2 -translate-x-1/2 text-[7px] font-medium" style={{ color: longitudinal < -0.1 ? 'rgba(255,51,85,0.8)' : 'rgba(255,255,255,0.25)' }}>BRK</span>
+      <span className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[7px] font-medium" style={{ color: longitudinal > 0.1 ? 'rgba(34,197,94,0.8)' : 'rgba(255,255,255,0.25)' }}>ACC</span>
+      <span className="absolute left-0 top-1/2 -translate-y-1/2 text-[7px] font-medium" style={{ color: lateral < -0.1 ? 'rgba(0,240,255,0.8)' : 'rgba(255,255,255,0.25)' }}>L</span>
+      <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[7px] font-medium" style={{ color: lateral > 0.1 ? 'rgba(251,191,36,0.8)' : 'rgba(255,255,255,0.25)' }}>R</span>
+
+      {/* G value in corner */}
+      <span className="absolute bottom-0.5 right-1 text-[8px] font-bold tabular-nums" style={{ color: intensity > 0.5 ? dotStroke : 'rgba(255,255,255,0.3)' }}>{gText}g</span>
     </div>
   );
 }
