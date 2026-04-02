@@ -597,7 +597,7 @@ export function ProfilePage() {
 
         {/* Version */}
         <div className="text-center text-xs text-ds-text-muted pb-4">
-          DriveSense v1.0.0
+          DriveSense v2.0.0
         </div>
 
         <div className="h-28" />
